@@ -702,46 +702,45 @@ def rebuild_pdf(doc: fitz.Document, pages: list[PageSpans], target_lang: str = "
             )
 
             if has_nonlatin:
-                # Non-Latin script: use insert_textbox — it manages its own cursor
-                # arithmetic internally, avoiding the accumulated measurement errors
-                # that plague manual per-run placement of shaped Devanagari glyphs.
-                tb_rect = span.rect
-                orig_size = span.font_size
-                min_size  = 7.0
-                placed    = False
-                for sz in (s / 2 for s in range(int(orig_size * 2), int(min_size * 2) - 1, -1)):
+                # Non-Latin script — single insert_text with Lohit-Devanagari.
+                #
+                # Why single-font insert_text instead of insert_textbox or per-run:
+                # • Lohit covers BOTH Devanagari AND Basic Latin in one TTF, so no
+                #   multi-run cursor arithmetic is needed (the old scrambling cause).
+                # • insert_text places text on the original baseline — critical for
+                #   table cells where insert_textbox word-wraps below the cell height,
+                #   making labels invisible.
+                # • MuPDF applies HarfBuzz shaping internally when the font is Devanagari,
+                #   so conjuncts/matras render correctly without manual glyph positioning.
+                min_size = 7.0
+                size = span.font_size
+                while size > min_size:
                     try:
-                        rc = page.insert_textbox(
-                            tb_rect, span.translated,
-                            fontfile=unicode_font,
-                            fontname=unicode_alias,
-                            fontsize=sz,
-                            color=color,
-                            rotate=rotate,
-                            align=fitz.TEXT_ALIGN_LEFT,
+                        tw = fitz.get_text_length(
+                            span.translated, fontfile=unicode_font,
+                            fontname=unicode_alias, fontsize=size,
                         )
-                        if rc >= 0:   # ≥0 → all chars placed
-                            placed = True
-                            break
-                    except Exception as exc:
-                        log.warning("textbox p%d sz=%.1f: %s", page_data.page_num, sz, exc)
+                    except Exception:
+                        tw = len(span.translated) * size * 0.55
+                    if tw <= span.rect.width * 1.1:
                         break
-                if not placed:
-                    # Fall back: insert at minimum size regardless of fit
-                    try:
-                        page.insert_textbox(
-                            tb_rect, span.translated,
-                            fontfile=unicode_font,
-                            fontname=unicode_alias,
-                            fontsize=min_size,
-                            color=color,
-                            rotate=rotate,
-                            align=fitz.TEXT_ALIGN_LEFT,
-                        )
-                    except Exception as exc:
-                        log.warning("textbox fallback p%d: %s", page_data.page_num, exc)
+                    size -= 0.5
+                size = max(size, min_size)
+
+                try:
+                    page.insert_text(
+                        fitz.Point(span.origin[0], span.origin[1]),
+                        span.translated,
+                        fontfile=unicode_font,
+                        fontname=unicode_alias,
+                        fontsize=size,
+                        color=color,
+                        rotate=rotate,
+                    )
+                except Exception as exc:
+                    log.warning("unicode insert_text p%d: %s", page_data.page_num, exc)
             else:
-                # Latin-only: precise baseline placement with insert_text
+                # Latin-only: precise baseline placement with built-in font
                 pt   = fitz.Point(span.origin[0], span.origin[1])
                 size = _fit_size(span.translated, latin_font, span.font_size, span.rect)
                 try:
