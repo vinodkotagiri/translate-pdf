@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libopenjp2-7 \
         fonts-noto-core \
         fonts-noto-cjk \
+        fonts-lohit-deva \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user

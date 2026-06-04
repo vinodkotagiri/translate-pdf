@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,47 +29,243 @@ REDACT_COLOR    = (1.0, 1.0, 1.0)  # white
 _NOTO_TTF = Path("/usr/share/fonts/truetype/noto")
 _NOTO_OTF = Path("/usr/share/fonts/opentype/noto")
 
-# Maps target language name (as returned by LANG_CODE_MAP) → candidate font files.
-# First existing file wins.
-_LANG_FONT_CANDIDATES: dict[str, list[str]] = {
-    "Hindi":                 [str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf")],
-    "Marathi":               [str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf")],
-    "Nepali":                [str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf")],
-    "Bengali":               [str(_NOTO_TTF / "NotoSansBengali-Regular.ttf")],
-    "Tamil":                 [str(_NOTO_TTF / "NotoSansTamil-Regular.ttf")],
-    "Telugu":                [str(_NOTO_TTF / "NotoSansTelugu-Regular.ttf")],
-    "Kannada":               [str(_NOTO_TTF / "NotoSansKannada-Regular.ttf")],
-    "Malayalam":             [str(_NOTO_TTF / "NotoSansMalayalam-Regular.ttf")],
-    "Gujarati":              [str(_NOTO_TTF / "NotoSansGujarati-Regular.ttf")],
-    "Punjabi":               [str(_NOTO_TTF / "NotoSansGurmukhi-Regular.ttf")],
-    "Arabic":                [str(_NOTO_TTF / "NotoNaskhArabic-Regular.ttf")],
-    "Urdu":                  [str(_NOTO_TTF / "NotoNaskhArabic-Regular.ttf")],
-    "Persian":               [str(_NOTO_TTF / "NotoNaskhArabic-Regular.ttf")],
-    "Hebrew":                [str(_NOTO_TTF / "NotoSansHebrew-Regular.ttf")],
-    "Thai":                  [str(_NOTO_TTF / "NotoSansThai-Regular.ttf")],
-    "Japanese":              [str(_NOTO_OTF / "NotoSansCJK-Regular.ttc")],
-    "Chinese (Simplified)":  [str(_NOTO_OTF / "NotoSansCJK-Regular.ttc")],
-    "Chinese (Traditional)": [str(_NOTO_OTF / "NotoSansCJK-Regular.ttc")],
-    "Korean":                [str(_NOTO_OTF / "NotoSansCJK-Regular.ttc")],
-    "Greek":                 [str(_NOTO_TTF / "NotoSans-Regular.ttf")],
-    "Russian":               [str(_NOTO_TTF / "NotoSans-Regular.ttf")],
-    "Ukrainian":             [str(_NOTO_TTF / "NotoSans-Regular.ttf")],
-    "Bulgarian":             [str(_NOTO_TTF / "NotoSans-Regular.ttf")],
-    "Serbian":               [str(_NOTO_TTF / "NotoSans-Regular.ttf")],
-    "Macedonian":            [str(_NOTO_TTF / "NotoSans-Regular.ttf")],
+# Maps target language name → regular and bold Noto font file candidates.
+# First existing path wins per weight.
+_LANG_FONT_CANDIDATES: dict[str, dict[str, list[str]]] = {
+    # Lohit-Devanagari covers Devanagari + Basic Latin + ₹ in one file, so Latin
+    # abbreviations (JLR, TML, CV, EBITDA …) render correctly inside a single textbox.
+    # NotoSansDevanagari is kept as fallback and for the bold weight.
+    "Hindi":                 {"r": ["/usr/share/fonts/truetype/lohit-devanagari/Lohit-Devanagari.ttf",
+                                    str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf")]},
+    "Marathi":               {"r": ["/usr/share/fonts/truetype/lohit-devanagari/Lohit-Devanagari.ttf",
+                                    str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf")]},
+    "Nepali":                {"r": ["/usr/share/fonts/truetype/lohit-devanagari/Lohit-Devanagari.ttf",
+                                    str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf")]},
+    "Bengali":               {"r": [str(_NOTO_TTF / "NotoSansBengali-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSansBengali-Bold.ttf")]},
+    "Tamil":                 {"r": [str(_NOTO_TTF / "NotoSansTamil-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSansTamil-Bold.ttf")]},
+    "Telugu":                {"r": [str(_NOTO_TTF / "NotoSansTelugu-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSansTelugu-Bold.ttf")]},
+    "Kannada":               {"r": [str(_NOTO_TTF / "NotoSansKannada-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSansKannada-Bold.ttf")]},
+    "Malayalam":             {"r": [str(_NOTO_TTF / "NotoSansMalayalam-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSansMalayalam-Bold.ttf")]},
+    "Gujarati":              {"r": [str(_NOTO_TTF / "NotoSansGujarati-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSansGujarati-Bold.ttf")]},
+    "Punjabi":               {"r": [str(_NOTO_TTF / "NotoSansGurmukhi-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSansGurmukhi-Bold.ttf")]},
+    "Arabic":                {"r": [str(_NOTO_TTF / "NotoNaskhArabic-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoNaskhArabic-Bold.ttf")]},
+    "Urdu":                  {"r": [str(_NOTO_TTF / "NotoNaskhArabic-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoNaskhArabic-Bold.ttf")]},
+    "Persian":               {"r": [str(_NOTO_TTF / "NotoNaskhArabic-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoNaskhArabic-Bold.ttf")]},
+    "Hebrew":                {"r": [str(_NOTO_TTF / "NotoSansHebrew-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSansHebrew-Bold.ttf")]},
+    "Thai":                  {"r": [str(_NOTO_TTF / "NotoSansThai-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSansThai-Bold.ttf")]},
+    "Japanese":              {"r": [str(_NOTO_OTF / "NotoSansCJK-Regular.ttc")],
+                              "b": [str(_NOTO_OTF / "NotoSansCJK-Bold.ttc")]},
+    "Chinese (Simplified)":  {"r": [str(_NOTO_OTF / "NotoSansCJK-Regular.ttc")],
+                              "b": [str(_NOTO_OTF / "NotoSansCJK-Bold.ttc")]},
+    "Chinese (Traditional)": {"r": [str(_NOTO_OTF / "NotoSansCJK-Regular.ttc")],
+                              "b": [str(_NOTO_OTF / "NotoSansCJK-Bold.ttc")]},
+    "Korean":                {"r": [str(_NOTO_OTF / "NotoSansCJK-Regular.ttc")],
+                              "b": [str(_NOTO_OTF / "NotoSansCJK-Bold.ttc")]},
+    "Greek":                 {"r": [str(_NOTO_TTF / "NotoSans-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSans-Bold.ttf")]},
+    "Russian":               {"r": [str(_NOTO_TTF / "NotoSans-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSans-Bold.ttf")]},
+    "Ukrainian":             {"r": [str(_NOTO_TTF / "NotoSans-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSans-Bold.ttf")]},
+    "Bulgarian":             {"r": [str(_NOTO_TTF / "NotoSans-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSans-Bold.ttf")]},
+    "Serbian":               {"r": [str(_NOTO_TTF / "NotoSans-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSans-Bold.ttf")]},
+    "Macedonian":            {"r": [str(_NOTO_TTF / "NotoSans-Regular.ttf")],
+                              "b": [str(_NOTO_TTF / "NotoSans-Bold.ttf")]},
 }
 
-_font_cache: dict[str, str | None] = {}
+# (lang, is_bold) → resolved font path or None
+_font_cache: dict[tuple[str, bool], str | None] = {}
 
 
-def _get_unicode_font(target_lang: str) -> str | None:
-    """Return path to a Noto font file for the target language, or None to use built-in Latin fonts."""
-    if target_lang not in _font_cache:
-        candidates = _LANG_FONT_CANDIDATES.get(target_lang, [])
-        _font_cache[target_lang] = next(
-            (p for p in candidates if Path(p).exists()), None
-        )
-    return _font_cache[target_lang]
+def _get_unicode_font(target_lang: str, is_bold: bool = False) -> str | None:
+    """Return path to a Noto font for the target language and weight, or None."""
+    key = (target_lang, is_bold)
+    if key not in _font_cache:
+        weight_key = "b" if is_bold else "r"
+        candidates = _LANG_FONT_CANDIDATES.get(target_lang, {}).get(weight_key, [])
+        found = next((p for p in candidates if Path(p).exists()), None)
+        if is_bold and not found:
+            found = _get_unicode_font(target_lang, is_bold=False)  # fall back to regular
+        _font_cache[key] = found
+    return _font_cache[key]
+
+
+# ── Mixed-script text helpers ──────────────────────────────────────────────────
+
+# Unicode ranges whose glyphs are absent from Latin-only PDF built-in fonts.
+_NON_LATIN_RANGES = (
+    (0x0900, 0x097F),  # Devanagari
+    (0x0980, 0x09FF),  # Bengali
+    (0x0A00, 0x0A7F),  # Gurmukhi
+    (0x0A80, 0x0AFF),  # Gujarati
+    (0x0B00, 0x0B7F),  # Oriya
+    (0x0B80, 0x0BFF),  # Tamil
+    (0x0C00, 0x0C7F),  # Telugu
+    (0x0C80, 0x0CFF),  # Kannada
+    (0x0D00, 0x0D7F),  # Malayalam
+    (0x0600, 0x06FF),  # Arabic
+    (0x0750, 0x077F),  # Arabic Supplement
+    (0x0590, 0x05FF),  # Hebrew
+    (0x0E00, 0x0E7F),  # Thai
+    (0x4E00, 0x9FFF),  # CJK Unified Ideographs
+    (0x3400, 0x4DBF),  # CJK Extension A
+    (0x3040, 0x309F),  # Hiragana
+    (0x30A0, 0x30FF),  # Katakana
+    (0xAC00, 0xD7AF),  # Hangul
+    # Symbols absent from all Base-14 PDF fonts — route to Noto so they render
+    (0x20A0, 0x20CF),  # Currency Symbols (₹ U+20B9, € U+20AC, etc.)
+    (0x2018, 0x201F),  # Typographic quotes
+    (0x2013, 0x2014),  # En/em dashes (some Base-14 versions lack them)
+)
+
+
+def _needs_unicode_font(ch: str) -> bool:
+    cp = ord(ch)
+    return any(lo <= cp <= hi for lo, hi in _NON_LATIN_RANGES)
+
+
+def _split_text_runs(text: str) -> list[tuple[bool, str]]:
+    """
+    Split text into (needs_unicode_font, substring) runs.
+    Unicode combining marks (matras, diacritics) stay attached to the preceding run
+    so Devanagari conjuncts are never broken.
+    """
+    if not text:
+        return []
+
+    def is_combining(ch: str) -> bool:
+        return unicodedata.category(ch) in ('Mn', 'Mc', 'Me', 'Cf')
+
+    first_real = next((c for c in text if not is_combining(c)), text[0])
+    cur_unicode = _needs_unicode_font(first_real)
+    cur_run = ""
+    runs: list[tuple[bool, str]] = []
+
+    for ch in text:
+        if is_combining(ch):
+            cur_run += ch  # glue to current run regardless of script
+            continue
+        needs = _needs_unicode_font(ch)
+        if needs == cur_unicode:
+            cur_run += ch
+        else:
+            if cur_run:
+                runs.append((cur_unicode, cur_run))
+            cur_unicode = needs
+            cur_run = ch
+
+    if cur_run:
+        runs.append((cur_unicode, cur_run))
+
+    return runs
+
+
+def _dir_to_rotate(direction: tuple[float, float]) -> int:
+    """Convert a (cos θ, sin θ) text direction to a PyMuPDF insert_text rotate angle."""
+    cos_a, sin_a = direction
+    if abs(cos_a) >= 0.9:           # horizontal
+        return 0 if cos_a > 0 else 180
+    return 90 if sin_a > 0 else 270  # vertical: 90 = bottom-to-top, 270 = top-to-bottom
+
+
+def _insert_text_mixed(
+    page: fitz.Page,
+    pt: fitz.Point,
+    text: str,
+    size: float,
+    color: tuple,
+    unicode_font: str | None,
+    latin_font: str,
+    unicode_alias: str = "F0",
+    rotate: int = 0,
+) -> None:
+    """
+    Insert text that may mix Devanagari/Arabic/CJK and Latin characters.
+    Each script run is rendered with the correct font so no glyphs go missing.
+    `unicode_alias` must be unique per distinct font file registered on the page
+    (use "F0" for regular weight, "F1" for bold).
+    """
+    if not unicode_font:
+        try:
+            page.insert_text(pt, text, fontname=latin_font, fontsize=size, color=color, rotate=rotate)
+        except Exception as exc:
+            log.warning("Insert failed: %s", exc)
+        return
+
+    runs = _split_text_runs(text)
+
+    # All-Latin fast path — skip per-run cursor arithmetic
+    if len(runs) == 1 and not runs[0][0]:
+        try:
+            page.insert_text(pt, text, fontname=latin_font, fontsize=size, color=color, rotate=rotate)
+        except Exception as exc:
+            log.warning("Insert failed: %s", exc)
+        return
+
+    x, y = pt.x, pt.y
+    for needs_unicode, run_text in runs:
+        if not run_text:
+            continue
+        tw = 0.0
+        if needs_unicode:
+            try:
+                tw = fitz.get_text_length(
+                    run_text, fontfile=unicode_font, fontname=unicode_alias, fontsize=size,
+                )
+            except Exception:
+                tw = len(run_text) * size * 0.6
+            try:
+                page.insert_text(
+                    fitz.Point(x, y), run_text,
+                    fontfile=unicode_font, fontname=unicode_alias,
+                    fontsize=size, color=color, rotate=rotate,
+                )
+            except Exception as exc:
+                log.warning("Unicode run insert failed: %s", exc)
+        else:
+            try:
+                tw = fitz.get_text_length(run_text, fontname=latin_font, fontsize=size)
+            except Exception:
+                tw = len(run_text) * size * 0.55
+            inserted = False
+            try:
+                page.insert_text(
+                    fitz.Point(x, y), run_text,
+                    fontname=latin_font, fontsize=size, color=color, rotate=rotate,
+                )
+                inserted = True
+            except Exception:
+                pass
+            if not inserted:
+                try:
+                    page.insert_text(
+                        fitz.Point(x, y), run_text,
+                        fontname="helv", fontsize=size, color=color, rotate=rotate,
+                    )
+                except Exception as exc:
+                    log.warning("Latin run insert failed: %s", exc)
+        # For vertical text, advance along y-axis instead of x
+        if rotate in (90, 270):
+            y += tw * (-1 if rotate == 90 else 1)
+        else:
+            x += tw
 
 
 # ── Data structures ────────────────────────────────────────────────────────────
@@ -85,6 +282,7 @@ class TextSpan:
     font_flags: int
     color:      int          # packed 0xRRGGBB
     origin:     tuple[float, float]
+    direction:  tuple[float, float] = (1.0, 0.0)  # (cos θ, sin θ) of text baseline
     translated: str = ""
 
 
@@ -112,6 +310,7 @@ def extract_pages(doc: fitz.Document) -> list[PageSpans]:
             if block.get("type") != 0:
                 continue  # skip image blocks
             for line in block.get("lines", []):
+                line_dir = tuple(line.get("dir", (1.0, 0.0)))  # (cos θ, sin θ)
                 for s_idx, span in enumerate(line.get("spans", [])):
                     # Handle both PyMuPDF span formats
                     if "text" in span:
@@ -136,6 +335,7 @@ def extract_pages(doc: fitz.Document) -> list[PageSpans]:
                         font_flags = span.get("flags", 0),
                         color      = span.get("color", 0),
                         origin     = tuple(span.get("origin", (rect.x0, rect.y1))),
+                        direction  = line_dir,
                     ))
 
         result.append(page_spans)
@@ -248,12 +448,30 @@ def _color_from_int(packed: int) -> tuple[float, float, float]:
 
 
 def _resolve_font(font_name: str, flags: int) -> str:
-    """Map original font to a built-in PyMuPDF font that renders reliably."""
+    """
+    Map original font to a built-in PDF font preserving bold and italic weight.
+    PyMuPDF Base-14 aliases: helv/hebo/heit/hebi, cour/cobo/coob/cobi, tiro/tibo/tiit/tibi.
+    """
     n = font_name.lower()
+    is_bold   = bool(flags & 16) or any(k in n for k in ("bold", "demi", "black", "heavy"))
+    is_italic = bool(flags & 2)  or any(k in n for k in ("italic", "oblique", "slant"))
+
     if any(k in n for k in ("mono", "courier", "cour", "consol", "code", "fixed")):
+        if is_bold and is_italic: return "cobi"   # Courier-BoldOblique
+        if is_bold:               return "cobo"   # Courier-Bold
+        if is_italic:             return "coob"   # Courier-Oblique
         return "cour"
+
     if any(k in n for k in ("times", "serif", "georgia", "garamond")):
+        if is_bold and is_italic: return "tibi"   # Times-BoldItalic
+        if is_bold:               return "tibo"   # Times-Bold
+        if is_italic:             return "tiit"   # Times-Italic
         return "tiro"
+
+    # Helvetica (default)
+    if is_bold and is_italic: return "hebi"       # Helvetica-BoldOblique
+    if is_bold:               return "hebo"       # Helvetica-Bold
+    if is_italic:             return "heit"       # Helvetica-Oblique
     return "helv"
 
 
@@ -265,7 +483,7 @@ def _fit_size(
     min_size: float = 4.0,
     font_file: str | None = None,
 ) -> float:
-    """Shrink font size until the text fits within the span's width."""
+    """Shrink font size until the text fits within the span's width (single-font path)."""
     size = orig_size
     while size >= min_size:
         try:
@@ -275,69 +493,251 @@ def _fit_size(
                 tw = fitz.get_text_length(text, fontname=font, fontsize=size)
         except Exception:
             tw = len(text) * size * 0.55
-        if tw <= rect.width * 1.15:
+        if tw <= rect.width:
             break
         size -= 0.5
     return max(size, min_size)
 
 
+def _fit_size_mixed(
+    text: str,
+    unicode_font: str | None,
+    unicode_alias: str,
+    latin_font: str,
+    orig_size: float,
+    rect: fitz.Rect,
+    min_size: float = 7.0,
+) -> float:
+    """
+    Shrink font size for mixed-script text.
+    Sums per-run widths using each run's actual font so the estimate is accurate.
+    A 5 % slack (1.05×) prevents crushing slightly-wider translations to tiny sizes.
+    Never goes below min_size to keep text readable.
+    """
+    runs = _split_text_runs(text)
+    size = orig_size
+    limit = rect.width * 1.05   # 5 % slack — better a tiny overhang than 4 pt text
+    while size >= min_size:
+        total = 0.0
+        for needs_unicode, run_text in runs:
+            if needs_unicode and unicode_font:
+                try:
+                    total += fitz.get_text_length(
+                        run_text, fontfile=unicode_font, fontname=unicode_alias, fontsize=size,
+                    )
+                except Exception:
+                    total += len(run_text) * size * 0.6
+            else:
+                try:
+                    total += fitz.get_text_length(run_text, fontname=latin_font, fontsize=size)
+                except Exception:
+                    total += len(run_text) * size * 0.55
+        if total <= limit:
+            break
+        size -= 0.5
+    return max(size, min_size)
+
+
+def _render_page_pixmap(page: fitz.Page) -> fitz.Pixmap:
+    """Render page at half resolution before modifications — used for background sampling."""
+    return page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5), colorspace=fitz.csRGB, annots=False)
+
+
+def _sample_bg_pixmap(
+    pix: fitz.Pixmap,
+    rect: fitz.Rect,
+) -> tuple[float, float, float]:
+    """
+    Sample background colour from the pre-modification page pixmap.
+    Collects a grid of pixels across the span's bounding box and returns
+    the median RGB (by luminance) — robust to isolated dark text pixels
+    that would bias a simple average or lightest-wins heuristic.
+    """
+    scale = 0.5
+    x0 = max(0, int(rect.x0 * scale))
+    x1 = min(pix.width  - 1, int(rect.x1 * scale))
+    y0 = max(0, int(rect.y0 * scale))
+    y1 = min(pix.height - 1, int(rect.y1 * scale))
+
+    samples: list[tuple[float, float, float]] = []
+    xs = [x0, (x0 + x1) // 2, x1]
+    ys = [y0, (y0 + y1) // 2, y1]
+    for xi in xs:
+        for yi in ys:
+            try:
+                p = pix.pixel(xi, yi)
+                samples.append((p[0] / 255.0, p[1] / 255.0, p[2] / 255.0))
+            except Exception:
+                pass
+
+    if not samples:
+        return REDACT_COLOR
+    # Sort by luminance and take the median — text ink (dark) is sorted to the low end
+    samples.sort(key=lambda c: 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2])
+    return samples[len(samples) // 2]
+
+
+def _build_bg_map(page: fitz.Page) -> list[tuple[fitz.Rect, tuple[float, float, float]]]:
+    """
+    Snapshot the filled drawing paths on a page BEFORE we modify it.
+    Returns a list of (rect, rgb) in PDF stream order (last entry = topmost drawn).
+    We skip hairline or degenerate paths that can't be backgrounds.
+    """
+    bg: list[tuple[fitz.Rect, tuple[float, float, float]]] = []
+    for d in page.get_drawings():
+        fill = d.get("fill")
+        rect = d.get("rect")
+        if not fill or not rect or len(fill) < 3:
+            continue
+        r = fitz.Rect(rect)
+        if r.width < 2 or r.height < 2:
+            continue
+        bg.append((r, (float(fill[0]), float(fill[1]), float(fill[2]))))
+    return bg
+
+
+def _find_bg_color(
+    bg_map: list[tuple[fitz.Rect, tuple[float, float, float]]],
+    pt: fitz.Point,
+) -> tuple[float, float, float]:
+    """
+    Return the fill colour of the topmost drawing that contains pt.
+    Iterates in reverse stream order so the last-drawn (visually topmost) wins.
+    Falls back to white if no drawing covers pt.
+    """
+    for rect, color in reversed(bg_map):
+        if rect.contains(pt):
+            return color
+    return REDACT_COLOR  # white
+
+
 def rebuild_pdf(doc: fitz.Document, pages: list[PageSpans], target_lang: str = "") -> fitz.Document:
     """
     For each translated span:
-      1. Erase original text with a white filled rectangle
+      1. Erase original text using the detected background colour (not a hardcoded white)
       2. Insert translated text at the exact baseline with matching style
 
-    For non-Latin target languages (Hindi, Arabic, CJK, etc.) a Noto font file
-    is used so glyphs are actually present; built-in PDF fonts only cover Latin.
+    Mixed-script text (e.g. Hindi body with Latin abbreviations like TML/JLR) is
+    split into per-script runs so each segment is rendered with the correct font.
     """
-    unicode_font = _get_unicode_font(target_lang) if target_lang else None
-    if target_lang and not unicode_font:
+    # Pre-resolve regular/bold unicode fonts for this language (cached after first call)
+    unicode_font_r = _get_unicode_font(target_lang, is_bold=False) if target_lang else None
+    unicode_font_b = _get_unicode_font(target_lang, is_bold=True)  if target_lang else None
+    if target_lang and not unicode_font_r:
         log.info("No unicode font found for '%s', falling back to built-in Latin fonts.", target_lang)
 
     for page_data in pages:
         page = doc[page_data.page_num]
+        # Snapshot background BEFORE any modifications (both vector and raster)
+        page_pix = _render_page_pixmap(page)
+        bg_map   = _build_bg_map(page)
+
         for span in page_data.spans:
             if not span.translated or span.translated == span.text:
                 continue
 
-            color = _color_from_int(span.color)
+            n = span.font_name.lower()
+            is_bold = bool(span.font_flags & 16) or any(
+                k in n for k in ("bold", "demi", "black", "heavy")
+            )
 
-            if unicode_font:
-                font_alias = "F0"
-                size = _fit_size(
-                    span.translated, font_alias, span.font_size, span.rect,
-                    font_file=unicode_font,
-                )
+            color      = _color_from_int(span.color)
+            latin_font = _resolve_font(span.font_name, span.font_flags)
+
+            # Pick the right weight unicode font; "F0"=regular, "F1"=bold
+            # (distinct aliases avoid alias-collision on the same page)
+            if is_bold and unicode_font_b:
+                unicode_font  = unicode_font_b
+                unicode_alias = "F1"
             else:
-                font_alias = _resolve_font(span.font_name, span.font_flags)
-                size = _fit_size(span.translated, font_alias, span.font_size, span.rect)
+                unicode_font  = unicode_font_r
+                unicode_alias = "F0"
 
-            # Erase original
+            rotate     = _dir_to_rotate(span.direction)
+            is_vertical = rotate in (90, 270)
+
+            # Detect background colour before erasing
+            span_centre = fitz.Point(
+                (span.rect.x0 + span.rect.x1) / 2,
+                (span.rect.y0 + span.rect.y1) / 2,
+            )
+            bg_color = _find_bg_color(bg_map, span_centre)
+            if bg_color == REDACT_COLOR:
+                bg_color = _sample_bg_pixmap(page_pix, span.rect)
+
             erase_rect = fitz.Rect(
                 span.rect.x0 - 1, span.rect.y0 - 1,
                 span.rect.x1 + 1, span.rect.y1 + 1,
             )
             shape = page.new_shape()
             shape.draw_rect(erase_rect)
-            shape.finish(color=None, fill=REDACT_COLOR, width=0)
+            shape.finish(color=None, fill=bg_color, width=0)
             shape.commit()
 
-            # Insert translation
-            pt = fitz.Point(span.origin[0], span.origin[1])
-            try:
-                if unicode_font:
-                    page.insert_text(
-                        pt, span.translated,
-                        fontfile=unicode_font, fontname=font_alias,
-                        fontsize=size, color=color,
-                    )
-                else:
-                    page.insert_text(pt, span.translated, fontname=font_alias, fontsize=size, color=color)
-            except Exception:
+            # ── Insertion strategy ──────────────────────────────────────────────
+            # Detect whether the translated text contains any non-Latin characters
+            has_nonlatin = unicode_font and any(
+                _needs_unicode_font(ch)
+                for ch in span.translated
+                if unicodedata.category(ch) not in ('Mn', 'Mc', 'Me', 'Cf')
+            )
+
+            if has_nonlatin:
+                # Non-Latin script: use insert_textbox — it manages its own cursor
+                # arithmetic internally, avoiding the accumulated measurement errors
+                # that plague manual per-run placement of shaped Devanagari glyphs.
+                tb_rect = span.rect
+                orig_size = span.font_size
+                min_size  = 7.0
+                placed    = False
+                for sz in (s / 2 for s in range(int(orig_size * 2), int(min_size * 2) - 1, -1)):
+                    try:
+                        rc = page.insert_textbox(
+                            tb_rect, span.translated,
+                            fontfile=unicode_font,
+                            fontname=unicode_alias,
+                            fontsize=sz,
+                            color=color,
+                            rotate=rotate,
+                            align=fitz.TEXT_ALIGN_LEFT,
+                        )
+                        if rc >= 0:   # ≥0 → all chars placed
+                            placed = True
+                            break
+                    except Exception as exc:
+                        log.warning("textbox p%d sz=%.1f: %s", page_data.page_num, sz, exc)
+                        break
+                if not placed:
+                    # Fall back: insert at minimum size regardless of fit
+                    try:
+                        page.insert_textbox(
+                            tb_rect, span.translated,
+                            fontfile=unicode_font,
+                            fontname=unicode_alias,
+                            fontsize=min_size,
+                            color=color,
+                            rotate=rotate,
+                            align=fitz.TEXT_ALIGN_LEFT,
+                        )
+                    except Exception as exc:
+                        log.warning("textbox fallback p%d: %s", page_data.page_num, exc)
+            else:
+                # Latin-only: precise baseline placement with insert_text
+                pt   = fitz.Point(span.origin[0], span.origin[1])
+                size = _fit_size(span.translated, latin_font, span.font_size, span.rect)
                 try:
-                    page.insert_text(pt, span.translated, fontname="helv", fontsize=size, color=color)
-                except Exception as exc:
-                    log.warning("Insert failed p%d: %s", page_data.page_num, exc)
+                    page.insert_text(
+                        pt, span.translated, fontname=latin_font,
+                        fontsize=size, color=color, rotate=rotate,
+                    )
+                except Exception:
+                    try:
+                        page.insert_text(
+                            pt, span.translated, fontname="helv",
+                            fontsize=size, color=color, rotate=rotate,
+                        )
+                    except Exception as exc:
+                        log.warning("insert_text p%d: %s", page_data.page_num, exc)
 
     return doc
 
