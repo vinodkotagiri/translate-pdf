@@ -636,6 +636,14 @@ def rebuild_pdf(doc: fitz.Document, pages: list[PageSpans], target_lang: str = "
             if not span.translated or span.translated == span.text:
                 continue
 
+            # Leave spans whose original text contains Private Use Area characters
+            # (U+E000–U+F8FF) — these are custom brand-logo/icon glyphs embedded in
+            # the original PDF font. No standard font can render them, so erasing the
+            # span and replacing with our font produces □ boxes. Skipping preserves
+            # the original custom-font rendering.
+            if any(0xE000 <= ord(ch) <= 0xF8FF for ch in span.text):
+                continue
+
             n = span.font_name.lower()
             is_bold = bool(span.font_flags & 16) or any(
                 k in n for k in ("bold", "demi", "black", "heavy")
@@ -644,13 +652,24 @@ def rebuild_pdf(doc: fitz.Document, pages: list[PageSpans], target_lang: str = "
             color      = _color_from_int(span.color)
             latin_font = _resolve_font(span.font_name, span.font_flags)
 
-            # Pick the right weight unicode font; "F0"=regular, "F1"=bold
-            # (distinct aliases avoid alias-collision on the same page)
-            if is_bold and unicode_font_b:
-                unicode_font  = unicode_font_b
+            # Determine whether the translated text is "mixed" (contains both
+            # Devanagari/non-Latin AND Basic-Latin characters like TGS, USP, etc.)
+            _non_combining = lambda ch: unicodedata.category(ch) not in ('Mn', 'Mc', 'Me', 'Cf')
+            trans_chars = [ch for ch in span.translated if _non_combining(ch) and ch.strip()]
+            _has_nonlatin_chars = any(_needs_unicode_font(ch) for ch in trans_chars)
+            _has_latin_chars    = any(not _needs_unicode_font(ch) for ch in trans_chars)
+            is_mixed = _has_nonlatin_chars and _has_latin_chars
+
+            # Font alias selection:
+            # • Pure Devanagari + bold → NotoSansDevanagari-Bold (proper bold, no Latin needed)
+            # • Mixed Devanagari+Latin → Lohit (regular weight, but covers BOTH scripts —
+            #   NotoSansDevanagari-Bold has NO Basic Latin, so TGS/USP would render as □)
+            # • Regular weight → Lohit / NotoSansDevanagari-Regular
+            if is_bold and unicode_font_b and not is_mixed:
+                unicode_font  = unicode_font_b   # pure Devanagari bold — no Latin needed
                 unicode_alias = "F1"
             else:
-                unicode_font  = unicode_font_r
+                unicode_font  = unicode_font_r   # Lohit: Devanagari + Latin in one font
                 unicode_alias = "F0"
 
             rotate     = _dir_to_rotate(span.direction)
