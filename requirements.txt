@@ -1,0 +1,37 @@
+# PDF Translator — Production Requirements
+# pip install -r requirements.txt
+
+# ── PDF engine ────────────────────────────────────────────────────────────────
+pymupdf>=1.24.0
+
+# ── Language detection ────────────────────────────────────────────────────────
+langdetect>=1.0.9
+
+# ── Web framework ────────────────────────────────────────────────────────────
+flask>=3.0.0
+flask-cors>=4.0.0
+python-dotenv>=1.0.0
+flask-limiter>=3.5.0
+
+# ── Production server ────────────────────────────────────────────────────────
+gunicorn>=22.0.0
+
+# ── Job store backend ────────────────────────────────────────────────────────
+redis>=5.0.0             # Redis client (optional — falls back to in-memory)
+
+# ── LLM providers (install only what you use) ────────────────────────────────
+
+# Anthropic Claude
+anthropic>=0.34.0
+
+# OpenAI · Grok · Groq · Mistral · Ollama (all use OpenAI-compatible API)
+openai>=1.40.0
+
+# Google Gemini
+google-genai>=1.0.0
+
+# Cohere (optional)
+# cohere>=5.0.0
+
+# ── Progress ─────────────────────────────────────────────────────────────────
+tqdm>=4.66.0
