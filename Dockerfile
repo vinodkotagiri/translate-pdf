@@ -8,16 +8,21 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM python:3.11-slim
 
-# System deps for PyMuPDF + Unicode fonts for non-Latin script rendering
+# System deps for PyMuPDF + Unicode fonts for Indian script rendering.
+# fonts-indic      → meta-package that installs Lohit fonts for all 22 Indian
+#                    scheduled languages (Bengali, Tamil, Telugu, Kannada,
+#                    Malayalam, Gujarati, Gurmukhi, Odia, Devanagari …)
+# fonts-noto-core  → NotoSans fallback fonts + Arabic, Hebrew, Thai …
+# fonts-noto-cjk   → Japanese, Chinese, Korean
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libmupdf-dev \
         libfreetype6 \
         libharfbuzz0b \
         libjpeg62-turbo \
         libopenjp2-7 \
+        fonts-indic \
         fonts-noto-core \
         fonts-noto-cjk \
-        fonts-lohit-deva \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user

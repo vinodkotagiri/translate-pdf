@@ -27,8 +27,9 @@ class Config:
 
     # ── Translation engine ───────────────────────────────────────────
     DEFAULT_PROVIDER   = os.environ.get("DEFAULT_PROVIDER", "claude")
-    MAX_WORKERS        = int(os.environ.get("MAX_WORKERS", 6))
+    MAX_WORKERS        = int(os.environ.get("MAX_WORKERS", 8))   # 8 parallel page workers
     CHUNK_SIZE         = int(os.environ.get("CHUNK_SIZE", 20))
+    MAX_PAGES          = int(os.environ.get("MAX_PAGES", 500))   # hard page-count cap
 
     # ── Redis (for Celery + rate limiting) ───────────────────────────
     REDIS_URL          = os.environ.get("REDIS_URL", "redis://localhost:6379/0")

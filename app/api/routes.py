@@ -22,7 +22,7 @@ import threading
 import time
 from pathlib import Path
 
-from flask import Blueprint, current_app, jsonify, request, send_file
+from flask import Blueprint, Response, current_app, jsonify, request, send_file
 
 from app.core.engine import translate_pdf_file
 from app.core.job_store import JobStatus, get_job_store
@@ -32,16 +32,21 @@ log = logging.getLogger(__name__)
 bp  = Blueprint("api", __name__)
 
 SUPPORTED_LANGUAGES = [
-    "Afrikaans", "Albanian", "Arabic", "Armenian", "Bengali", "Bosnian",
-    "Bulgarian", "Catalan", "Chinese (Simplified)", "Chinese (Traditional)",
+    # ── Indian languages (22 official scheduled languages + Sanskrit) ──────────
+    "Hindi", "Bengali", "Telugu", "Marathi", "Tamil", "Urdu", "Gujarati",
+    "Kannada", "Malayalam", "Odia", "Punjabi", "Assamese", "Maithili",
+    "Sanskrit", "Kashmiri", "Sindhi", "Konkani", "Dogri", "Bodo", "Nepali",
+    # ── Other Asian ───────────────────────────────────────────────────────────
+    "Arabic", "Persian", "Hebrew", "Thai", "Japanese",
+    "Chinese (Simplified)", "Chinese (Traditional)", "Korean", "Vietnamese",
+    "Indonesian", "Malay",
+    # ── European ─────────────────────────────────────────────────────────────
+    "Afrikaans", "Albanian", "Armenian", "Bosnian", "Bulgarian", "Catalan",
     "Croatian", "Czech", "Danish", "Dutch", "English", "Estonian", "Finnish",
-    "French", "German", "Greek", "Gujarati", "Hebrew", "Hindi", "Hungarian",
-    "Icelandic", "Indonesian", "Italian", "Japanese", "Kannada", "Korean",
-    "Latvian", "Lithuanian", "Macedonian", "Malay", "Malayalam", "Maltese",
-    "Marathi", "Norwegian", "Persian", "Polish", "Portuguese", "Punjabi",
-    "Romanian", "Russian", "Serbian", "Slovak", "Slovenian", "Spanish",
-    "Swahili", "Swedish", "Tamil", "Telugu", "Thai", "Turkish", "Ukrainian",
-    "Urdu", "Vietnamese", "Welsh",
+    "French", "German", "Greek", "Hungarian", "Icelandic", "Italian",
+    "Latvian", "Lithuanian", "Macedonian", "Maltese", "Norwegian", "Polish",
+    "Portuguese", "Romanian", "Russian", "Serbian", "Slovak", "Slovenian",
+    "Spanish", "Swahili", "Swedish", "Turkish", "Ukrainian", "Welsh",
 ]
 
 
@@ -172,6 +177,358 @@ def health():
         "version": "1.0.0",
         "jobs":    counts,
     })
+
+
+# ── API Documentation ─────────────────────────────────────────────────────────
+
+@bp.get("/api/docs")
+def api_docs():
+    """Serve Swagger UI for interactive API exploration."""
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>PDF Translator API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"/>
+  <style>
+    body { margin: 0; }
+    #swagger-ui .topbar { background: #1a1a2e; }
+    #swagger-ui .topbar-wrapper img { content: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM12 17v-4m0 0V9m0 4h-3m3 0h3"/></svg>'); height:32px; }
+  </style>
+</head>
+<body>
+<div id="swagger-ui"></div>
+<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script>
+  SwaggerUIBundle({
+    url: "/api/openapi.json",
+    dom_id: "#swagger-ui",
+    presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+    layout: "BaseLayout",
+    deepLinking: true,
+    displayOperationId: false,
+    defaultModelsExpandDepth: 1,
+    defaultModelExpandDepth: 1,
+  });
+</script>
+</body>
+</html>"""
+    return Response(html, mimetype="text/html")
+
+
+@bp.get("/api/openapi.json")
+def openapi_spec():
+    """Return the OpenAPI 3.0 specification for this API."""
+    base = request.host_url.rstrip("/")
+    spec = {
+        "openapi": "3.0.3",
+        "info": {
+            "title": "PDF Translator API",
+            "version": "1.0.0",
+            "description": (
+                "Production-grade PDF translation service. Extracts searchable text from PDFs, "
+                "translates it via LLM providers, and reconstructs the PDF with translated text "
+                "while preserving all layout, images, and formatting.\n\n"
+                "**Indian languages** (all 22 scheduled languages) are mandatory and prioritised. "
+                "**Page limit**: 500 pages per document. "
+                "**Throughput target**: ≥10 PDFs/minute with a fast LLM provider."
+            ),
+            "contact": {"name": "API Support", "email": "support@example.com"},
+        },
+        "servers": [{"url": base, "description": "This server"}],
+        "tags": [
+            {"name": "translation", "description": "Submit and retrieve PDF translations"},
+            {"name": "jobs",        "description": "Async job lifecycle management"},
+            {"name": "metadata",    "description": "Providers, languages, and health"},
+        ],
+        "paths": {
+            "/health": {
+                "get": {
+                    "tags": ["metadata"],
+                    "summary": "Health check",
+                    "description": "Liveness + readiness probe. Also purges expired jobs.",
+                    "operationId": "health",
+                    "responses": {
+                        "200": {
+                            "description": "Service is healthy",
+                            "content": {"application/json": {"schema": {
+                                "type": "object",
+                                "properties": {
+                                    "status":  {"type": "string", "example": "ok"},
+                                    "service": {"type": "string", "example": "pdf-translator"},
+                                    "version": {"type": "string", "example": "1.0.0"},
+                                    "jobs":    {"type": "object", "description": "Job counts by status"},
+                                },
+                            }}},
+                        }
+                    },
+                }
+            },
+            "/api/v1/providers": {
+                "get": {
+                    "tags": ["metadata"],
+                    "summary": "List available LLM providers",
+                    "operationId": "listProviders",
+                    "responses": {
+                        "200": {
+                            "description": "Provider list",
+                            "content": {"application/json": {"schema": {
+                                "type": "object",
+                                "properties": {
+                                    "count":     {"type": "integer"},
+                                    "providers": {"type": "array", "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "provider":        {"type": "string"},
+                                            "default_model":   {"type": "string"},
+                                            "models":          {"type": "array", "items": {"type": "string"}},
+                                            "env_key":         {"type": "string"},
+                                            "key_configured":  {"type": "boolean"},
+                                        },
+                                    }},
+                                },
+                            }}},
+                        }
+                    },
+                }
+            },
+            "/api/v1/languages": {
+                "get": {
+                    "tags": ["metadata"],
+                    "summary": "List supported target languages",
+                    "description": "Indian languages appear first and are mandatory.",
+                    "operationId": "listLanguages",
+                    "responses": {
+                        "200": {
+                            "description": "Language list",
+                            "content": {"application/json": {"schema": {
+                                "type": "object",
+                                "properties": {
+                                    "count":     {"type": "integer"},
+                                    "languages": {"type": "array", "items": {"type": "string"},
+                                                  "example": ["Hindi", "Bengali", "Tamil", "English"]},
+                                },
+                            }}},
+                        }
+                    },
+                }
+            },
+            "/api/v1/translate": {
+                "post": {
+                    "tags": ["translation"],
+                    "summary": "Translate PDF (synchronous)",
+                    "description": (
+                        "Upload a PDF and receive the translated PDF in the response body. "
+                        "The call blocks until translation is complete. Maximum **500 pages**.\n\n"
+                        "Original text is **deleted from the content stream** via PDF redaction "
+                        "(not just painted over), so the output is clean and fully searchable "
+                        "in the target language."
+                    ),
+                    "operationId": "translateSync",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "multipart/form-data": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["file", "target_lang"],
+                                    "properties": {
+                                        "file":        {"type": "string", "format": "binary",
+                                                        "description": "PDF file to translate"},
+                                        "target_lang": {"type": "string", "example": "Hindi",
+                                                        "description": "Target language name"},
+                                        "provider":    {"type": "string", "default": "claude",
+                                                        "enum": ["claude", "openai", "gemini", "grok", "groq", "mistral", "cohere", "ollama"]},
+                                        "model":       {"type": "string", "description": "Override default model"},
+                                        "api_key":     {"type": "string", "description": "Override env-var API key"},
+                                        "source_lang": {"type": "string", "description": "Skip auto-detection"},
+                                        "max_workers": {"type": "integer", "default": 8, "minimum": 1, "maximum": 20,
+                                                        "description": "Parallel translation threads"},
+                                        "chunk_size":  {"type": "integer", "default": 20, "minimum": 1, "maximum": 50,
+                                                        "description": "Text spans per LLM call"},
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "Translated PDF",
+                            "headers": {
+                                "X-Pages":       {"schema": {"type": "integer"}, "description": "Page count"},
+                                "X-Spans":       {"schema": {"type": "integer"}, "description": "Translated span count"},
+                                "X-Provider":    {"schema": {"type": "string"},  "description": "LLM provider used"},
+                                "X-Model":       {"schema": {"type": "string"},  "description": "Model used"},
+                                "X-Source-Lang": {"schema": {"type": "string"},  "description": "Detected source language"},
+                                "X-Target-Lang": {"schema": {"type": "string"},  "description": "Target language"},
+                                "X-Size-MB":     {"schema": {"type": "number"},  "description": "Output file size"},
+                            },
+                            "content": {"application/pdf": {"schema": {"type": "string", "format": "binary"}}},
+                        },
+                        "400": {"description": "Validation error"},
+                        "413": {"description": "File exceeds upload size limit"},
+                        "422": {"description": "Document exceeds 500-page limit"},
+                        "500": {"description": "Translation failed"},
+                    },
+                }
+            },
+            "/api/v1/translate/async": {
+                "post": {
+                    "tags": ["translation"],
+                    "summary": "Translate PDF (asynchronous)",
+                    "description": (
+                        "Submit a translation job. Returns a `job_id` immediately. "
+                        "Poll `GET /api/v1/jobs/{job_id}` until `status` is `done`, "
+                        "then download from `GET /api/v1/jobs/{job_id}/download`.\n\n"
+                        "Same form fields as the synchronous endpoint."
+                    ),
+                    "operationId": "translateAsync",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "multipart/form-data": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["file", "target_lang"],
+                                    "properties": {
+                                        "file":        {"type": "string", "format": "binary"},
+                                        "target_lang": {"type": "string", "example": "Tamil"},
+                                        "provider":    {"type": "string", "default": "claude"},
+                                        "model":       {"type": "string"},
+                                        "api_key":     {"type": "string"},
+                                        "source_lang": {"type": "string"},
+                                        "max_workers": {"type": "integer", "default": 8},
+                                        "chunk_size":  {"type": "integer", "default": 20},
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "202": {
+                            "description": "Job accepted",
+                            "content": {"application/json": {"schema": {
+                                "type": "object",
+                                "properties": {
+                                    "job_id":       {"type": "string"},
+                                    "status":       {"type": "string", "example": "queued"},
+                                    "poll_url":     {"type": "string", "format": "uri"},
+                                    "download_url": {"type": "string", "format": "uri"},
+                                },
+                            }}},
+                        },
+                        "400": {"description": "Validation error"},
+                        "503": {"description": "Server busy — too many active jobs"},
+                    },
+                }
+            },
+            "/api/v1/jobs": {
+                "get": {
+                    "tags": ["jobs"],
+                    "summary": "List all jobs",
+                    "operationId": "listJobs",
+                    "responses": {
+                        "200": {"description": "Job list", "content": {"application/json": {"schema": {
+                            "type": "object",
+                            "properties": {
+                                "count": {"type": "integer"},
+                                "jobs":  {"type": "array", "items": {"$ref": "#/components/schemas/JobSummary"}},
+                            },
+                        }}}},
+                    },
+                }
+            },
+            "/api/v1/jobs/{job_id}": {
+                "get": {
+                    "tags": ["jobs"],
+                    "summary": "Get job status",
+                    "operationId": "getJob",
+                    "parameters": [{"name": "job_id", "in": "path", "required": True,
+                                    "schema": {"type": "string"}}],
+                    "responses": {
+                        "200": {"description": "Job detail", "content": {"application/json": {"schema": {
+                            "$ref": "#/components/schemas/JobDetail"
+                        }}}},
+                        "404": {"description": "Job not found"},
+                    },
+                },
+                "delete": {
+                    "tags": ["jobs"],
+                    "summary": "Delete a completed or failed job",
+                    "operationId": "deleteJob",
+                    "parameters": [{"name": "job_id", "in": "path", "required": True,
+                                    "schema": {"type": "string"}}],
+                    "responses": {
+                        "200": {"description": "Job deleted"},
+                        "404": {"description": "Job not found"},
+                        "409": {"description": "Cannot delete an active job"},
+                    },
+                },
+            },
+            "/api/v1/jobs/{job_id}/download": {
+                "get": {
+                    "tags": ["jobs"],
+                    "summary": "Download translated PDF",
+                    "operationId": "downloadJob",
+                    "parameters": [{"name": "job_id", "in": "path", "required": True,
+                                    "schema": {"type": "string"}}],
+                    "responses": {
+                        "200": {"description": "Translated PDF",
+                                "content": {"application/pdf": {"schema": {"type": "string", "format": "binary"}}}},
+                        "202": {"description": "Job still processing"},
+                        "404": {"description": "Job not found or file expired"},
+                        "500": {"description": "Job failed"},
+                    },
+                }
+            },
+        },
+        "components": {
+            "schemas": {
+                "JobSummary": {
+                    "type": "object",
+                    "properties": {
+                        "job_id":       {"type": "string"},
+                        "status":       {"type": "string", "enum": ["queued", "processing", "done", "failed"]},
+                        "provider":     {"type": "string"},
+                        "target_lang":  {"type": "string"},
+                        "created_at":   {"type": "number"},
+                        "finished_at":  {"type": "number", "nullable": True},
+                        "download_url": {"type": "string", "nullable": True},
+                    },
+                },
+                "JobDetail": {
+                    "type": "object",
+                    "properties": {
+                        "job_id":           {"type": "string"},
+                        "status":           {"type": "string", "enum": ["queued", "processing", "done", "failed"]},
+                        "provider":         {"type": "string"},
+                        "model":            {"type": "string"},
+                        "target_lang":      {"type": "string"},
+                        "filename":         {"type": "string"},
+                        "created_at":       {"type": "number"},
+                        "started_at":       {"type": "number", "nullable": True},
+                        "finished_at":      {"type": "number", "nullable": True},
+                        "duration_seconds": {"type": "number", "nullable": True},
+                        "error":            {"type": "string", "nullable": True},
+                        "result": {
+                            "type": "object",
+                            "nullable": True,
+                            "properties": {
+                                "pages":       {"type": "integer"},
+                                "spans":       {"type": "integer"},
+                                "source_lang": {"type": "string"},
+                                "size_mb":     {"type": "number"},
+                                "warning":     {"type": "string", "nullable": True},
+                            },
+                        },
+                        "download_url": {"type": "string", "nullable": True},
+                    },
+                },
+            }
+        },
+    }
+    return jsonify(spec)
 
 
 # ── Providers ────────────────────────────────────────────────────────────────
