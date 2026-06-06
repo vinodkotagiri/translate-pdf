@@ -59,80 +59,116 @@ _LOHIT_BASE = Path("/usr/share/fonts/truetype")
 _LANG_FONT_CANDIDATES: dict[str, dict[str, list[str]]] = {
 
     # ── Devanagari script ──────────────────────────────────────────────────────
-    # Lohit-Devanagari covers Devanagari + Basic Latin + ₹ in one file.
-    # NotoSansDevanagari is kept as fallback and for bold weight.
-    "Hindi":    {"r": [str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf"),
-                       str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf")],
-                 "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf")]},
-    "Marathi":  {"r": [str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf"),
-                       str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf")],
-                 "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf")]},
-    "Nepali":   {"r": [str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf"),
-                       str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf")],
-                 "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf")]},
-    "Sanskrit": {"r": [str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf"),
-                       str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf")],
-                 "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf")]},
-    "Maithili": {"r": [str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf"),
-                       str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf")],
-                 "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf")]},
-    "Bodo":     {"r": [str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf"),
-                       str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf")],
-                 "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf")]},
-    "Dogri":    {"r": [str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf"),
-                       str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf")],
-                 "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf")]},
-    "Konkani":  {"r": [str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf"),
-                       str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf")],
-                 "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf")]},
+    # NotoSansDevanagari is listed first: it has superior HarfBuzz GSUB tables
+    # for conjunct formation (e.g. ट्रे, क्ष, ज्ञ) and covers Basic Latin so
+    # mixed Hindi+Latin text (EBITDA मार्जिन) renders correctly from one font.
+    # OTF path is a fallback for systems that install Noto under opentype/.
+    # Lohit-Devanagari is the final fallback (older systems / smaller footprint).
+    "Hindi":    {"r": [str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf"),
+                       str(_NOTO_OTF / "NotoSansDevanagari-Regular.ttf"),
+                       str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf")],
+                 "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf"),
+                       str(_NOTO_OTF / "NotoSansDevanagari-Bold.ttf"),
+                       str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf")]},
+    "Marathi":  {"r": [str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf"),
+                       str(_NOTO_OTF / "NotoSansDevanagari-Regular.ttf"),
+                       str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf")],
+                 "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf"),
+                       str(_NOTO_OTF / "NotoSansDevanagari-Bold.ttf"),
+                       str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf")]},
+    "Nepali":   {"r": [str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf"),
+                       str(_NOTO_OTF / "NotoSansDevanagari-Regular.ttf"),
+                       str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf")],
+                 "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf"),
+                       str(_NOTO_OTF / "NotoSansDevanagari-Bold.ttf"),
+                       str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf")]},
+    "Sanskrit": {"r": [str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf"),
+                       str(_NOTO_OTF / "NotoSansDevanagari-Regular.ttf"),
+                       str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf")],
+                 "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf"),
+                       str(_NOTO_OTF / "NotoSansDevanagari-Bold.ttf"),
+                       str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf")]},
+    "Maithili": {"r": [str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf"),
+                       str(_NOTO_OTF / "NotoSansDevanagari-Regular.ttf"),
+                       str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf")],
+                 "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf"),
+                       str(_NOTO_OTF / "NotoSansDevanagari-Bold.ttf"),
+                       str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf")]},
+    "Bodo":     {"r": [str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf"),
+                       str(_NOTO_OTF / "NotoSansDevanagari-Regular.ttf"),
+                       str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf")],
+                 "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf"),
+                       str(_NOTO_OTF / "NotoSansDevanagari-Bold.ttf"),
+                       str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf")]},
+    "Dogri":    {"r": [str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf"),
+                       str(_NOTO_OTF / "NotoSansDevanagari-Regular.ttf"),
+                       str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf")],
+                 "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf"),
+                       str(_NOTO_OTF / "NotoSansDevanagari-Bold.ttf"),
+                       str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf")]},
+    "Konkani":  {"r": [str(_NOTO_TTF / "NotoSansDevanagari-Regular.ttf"),
+                       str(_NOTO_OTF / "NotoSansDevanagari-Regular.ttf"),
+                       str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf")],
+                 "b": [str(_NOTO_TTF / "NotoSansDevanagari-Bold.ttf"),
+                       str(_NOTO_OTF / "NotoSansDevanagari-Bold.ttf"),
+                       str(_LOHIT_BASE / "lohit-devanagari/Lohit-Devanagari.ttf")]},
 
     # ── Bengali / Assamese script ──────────────────────────────────────────────
-    # fonts-indic installs Lohit fonts for all Indian scripts. Noto is fallback.
-    "Bengali":  {"r": [str(_LOHIT_BASE / "lohit-bengali/Lohit-Bengali.ttf"),
-                       str(_NOTO_TTF / "NotoSansBengali-Regular.ttf")],
-                 "b": [str(_NOTO_TTF / "NotoSansBengali-Bold.ttf")]},
-    "Assamese": {"r": [str(_LOHIT_BASE / "lohit-assamese/Lohit-Assamese.ttf"),
-                       str(_LOHIT_BASE / "lohit-bengali/Lohit-Bengali.ttf"),
-                       str(_NOTO_TTF / "NotoSansBengali-Regular.ttf")],
-                 "b": [str(_NOTO_TTF / "NotoSansBengali-Bold.ttf")]},
+    # Noto primary (superior HarfBuzz shaping), Lohit fallback.
+    "Bengali":  {"r": [str(_NOTO_TTF / "NotoSansBengali-Regular.ttf"),
+                       str(_LOHIT_BASE / "lohit-bengali/Lohit-Bengali.ttf")],
+                 "b": [str(_NOTO_TTF / "NotoSansBengali-Bold.ttf"),
+                       str(_LOHIT_BASE / "lohit-bengali/Lohit-Bengali.ttf")]},
+    "Assamese": {"r": [str(_NOTO_TTF / "NotoSansBengali-Regular.ttf"),
+                       str(_LOHIT_BASE / "lohit-assamese/Lohit-Assamese.ttf"),
+                       str(_LOHIT_BASE / "lohit-bengali/Lohit-Bengali.ttf")],
+                 "b": [str(_NOTO_TTF / "NotoSansBengali-Bold.ttf"),
+                       str(_LOHIT_BASE / "lohit-bengali/Lohit-Bengali.ttf")]},
 
     # ── Tamil script ───────────────────────────────────────────────────────────
-    "Tamil":    {"r": [str(_LOHIT_BASE / "lohit-tamil/Lohit-Tamil.ttf"),
-                       str(_LOHIT_BASE / "lohit-tamil-classical/Lohit-Tamil-Classical.ttf"),
-                       str(_NOTO_TTF / "NotoSansTamil-Regular.ttf")],
-                 "b": [str(_NOTO_TTF / "NotoSansTamil-Bold.ttf")]},
+    "Tamil":    {"r": [str(_NOTO_TTF / "NotoSansTamil-Regular.ttf"),
+                       str(_LOHIT_BASE / "lohit-tamil/Lohit-Tamil.ttf"),
+                       str(_LOHIT_BASE / "lohit-tamil-classical/Lohit-Tamil-Classical.ttf")],
+                 "b": [str(_NOTO_TTF / "NotoSansTamil-Bold.ttf"),
+                       str(_LOHIT_BASE / "lohit-tamil/Lohit-Tamil.ttf")]},
 
     # ── Telugu script ──────────────────────────────────────────────────────────
-    "Telugu":   {"r": [str(_LOHIT_BASE / "lohit-telugu/Lohit-Telugu.ttf"),
-                       str(_NOTO_TTF / "NotoSansTelugu-Regular.ttf")],
-                 "b": [str(_NOTO_TTF / "NotoSansTelugu-Bold.ttf")]},
+    "Telugu":   {"r": [str(_NOTO_TTF / "NotoSansTelugu-Regular.ttf"),
+                       str(_LOHIT_BASE / "lohit-telugu/Lohit-Telugu.ttf")],
+                 "b": [str(_NOTO_TTF / "NotoSansTelugu-Bold.ttf"),
+                       str(_LOHIT_BASE / "lohit-telugu/Lohit-Telugu.ttf")]},
 
     # ── Kannada script ─────────────────────────────────────────────────────────
-    "Kannada":  {"r": [str(_LOHIT_BASE / "lohit-kannada/Lohit-Kannada.ttf"),
-                       str(_NOTO_TTF / "NotoSansKannada-Regular.ttf")],
-                 "b": [str(_NOTO_TTF / "NotoSansKannada-Bold.ttf")]},
+    "Kannada":  {"r": [str(_NOTO_TTF / "NotoSansKannada-Regular.ttf"),
+                       str(_LOHIT_BASE / "lohit-kannada/Lohit-Kannada.ttf")],
+                 "b": [str(_NOTO_TTF / "NotoSansKannada-Bold.ttf"),
+                       str(_LOHIT_BASE / "lohit-kannada/Lohit-Kannada.ttf")]},
 
     # ── Malayalam script ───────────────────────────────────────────────────────
-    "Malayalam":{"r": [str(_LOHIT_BASE / "lohit-malayalam/Lohit-Malayalam.ttf"),
-                       str(_NOTO_TTF / "NotoSansMalayalam-Regular.ttf")],
-                 "b": [str(_NOTO_TTF / "NotoSansMalayalam-Bold.ttf")]},
+    "Malayalam":{"r": [str(_NOTO_TTF / "NotoSansMalayalam-Regular.ttf"),
+                       str(_LOHIT_BASE / "lohit-malayalam/Lohit-Malayalam.ttf")],
+                 "b": [str(_NOTO_TTF / "NotoSansMalayalam-Bold.ttf"),
+                       str(_LOHIT_BASE / "lohit-malayalam/Lohit-Malayalam.ttf")]},
 
     # ── Gujarati script ────────────────────────────────────────────────────────
-    "Gujarati": {"r": [str(_LOHIT_BASE / "lohit-gujarati/Lohit-Gujarati.ttf"),
-                       str(_NOTO_TTF / "NotoSansGujarati-Regular.ttf")],
-                 "b": [str(_NOTO_TTF / "NotoSansGujarati-Bold.ttf")]},
+    "Gujarati": {"r": [str(_NOTO_TTF / "NotoSansGujarati-Regular.ttf"),
+                       str(_LOHIT_BASE / "lohit-gujarati/Lohit-Gujarati.ttf")],
+                 "b": [str(_NOTO_TTF / "NotoSansGujarati-Bold.ttf"),
+                       str(_LOHIT_BASE / "lohit-gujarati/Lohit-Gujarati.ttf")]},
 
     # ── Gurmukhi script (Punjabi) ──────────────────────────────────────────────
-    "Punjabi":  {"r": [str(_LOHIT_BASE / "lohit-punjabi/Lohit-Gurmukhi.ttf"),
-                       str(_NOTO_TTF / "NotoSansGurmukhi-Regular.ttf")],
-                 "b": [str(_NOTO_TTF / "NotoSansGurmukhi-Bold.ttf")]},
+    "Punjabi":  {"r": [str(_NOTO_TTF / "NotoSansGurmukhi-Regular.ttf"),
+                       str(_LOHIT_BASE / "lohit-punjabi/Lohit-Gurmukhi.ttf")],
+                 "b": [str(_NOTO_TTF / "NotoSansGurmukhi-Bold.ttf"),
+                       str(_LOHIT_BASE / "lohit-punjabi/Lohit-Gurmukhi.ttf")]},
 
     # ── Odia (Oriya) script ────────────────────────────────────────────────────
-    "Odia":     {"r": [str(_LOHIT_BASE / "lohit-oriya/Lohit-Odia.ttf"),
-                       str(_NOTO_TTF / "NotoSansOriya-Regular.ttf"),
-                       str(_NOTO_TTF / "NotoSansOdiya-Regular.ttf")],
+    "Odia":     {"r": [str(_NOTO_TTF / "NotoSansOriya-Regular.ttf"),
+                       str(_NOTO_TTF / "NotoSansOdiya-Regular.ttf"),
+                       str(_LOHIT_BASE / "lohit-oriya/Lohit-Odia.ttf")],
                  "b": [str(_NOTO_TTF / "NotoSansOriya-Bold.ttf"),
-                       str(_NOTO_TTF / "NotoSansOdiya-Bold.ttf")]},
+                       str(_NOTO_TTF / "NotoSansOdiya-Bold.ttf"),
+                       str(_LOHIT_BASE / "lohit-oriya/Lohit-Odia.ttf")]},
 
     # ── Arabic / Perso-Arabic script ──────────────────────────────────────────
     "Arabic":   {"r": [str(_NOTO_TTF / "NotoNaskhArabic-Regular.ttf")],
@@ -756,6 +792,27 @@ def rebuild_pdf(doc: fitz.Document, pages: list[PageSpans], target_lang: str = "
         if not pending:
             continue
 
+        # Deduplicate: two spans with identical text whose bounding boxes overlap or
+        # whose y-midpoints are within 5pt of each other on the same line represent
+        # the same visual element (e.g. a bold "BUY" badge AND "BUY" inside the
+        # adjacent sentence span). Inserting both translations produces "खरीदें खरीदें".
+        # Keep the first occurrence; subsequent near-duplicates are dropped.
+        deduped: list[TextSpan] = []
+        for span in pending:
+            mid_y = (span.rect.y0 + span.rect.y1) * 0.5
+            is_dup = any(
+                s.text == span.text
+                and abs((s.rect.y0 + s.rect.y1) * 0.5 - mid_y) < 5.0
+                and not (s.rect & fitz.Rect(
+                    span.rect.x0 - 3, span.rect.y0 - 3,
+                    span.rect.x1 + 3, span.rect.y1 + 3,
+                )).is_empty
+                for s in deduped
+            )
+            if not is_dup:
+                deduped.append(span)
+        pending = deduped
+
         # ── Phase 2: cover original text with background-matched rectangles ─────
         # PDF redaction (add_redact_annot + apply_redactions) only processes the
         # page's own content stream.  Text rendered through Form XObjects — common
@@ -782,18 +839,13 @@ def rebuild_pdf(doc: fitz.Document, pages: list[PageSpans], target_lang: str = "
                 except Exception:
                     pass
 
-        # Collect image bounding boxes for background-colour sampling.
-        _image_rects: list[fitz.Rect] = []
-        try:
-            for info in page.get_image_info():
-                _image_rects.append(fitz.Rect(info["bbox"]))
-        except Exception:
-            pass
-
-        # Lazy low-res pixmap — rendered only when a span sits on an image
-        # background and we need to sample the actual pixel colour there.
-        _pix: fitz.Pixmap | None = None
         _PIX_SCALE = 0.5  # 50 % scale is fast and accurate enough for colour sampling
+
+        # Pre-render the page pixmap BEFORE any draw_rect modifications so that
+        # background colour sampling always reflects the original page content —
+        # including text rendered through Form XObjects (coloured side strips,
+        # ICICI-style vertical banners) that are invisible to get_drawings().
+        _pix = page.get_pixmap(matrix=fitz.Matrix(_PIX_SCALE, _PIX_SCALE))
 
         def _bg_at(rect: fitz.Rect) -> tuple:
             area = rect.get_area()
@@ -809,53 +861,97 @@ def rebuild_pdf(doc: fitz.Document, pages: list[PageSpans], target_lang: str = "
                     best_ov, best_col = ov, col
             return best_col if best_ov > 0.2 else (1.0, 1.0, 1.0)
 
-        def _center_over_image(rect: fitz.Rect) -> bool:
-            """True only if the span's centre point falls inside an image rect.
-            Area-ratio checks were too broad — icon PNGs have transparent padding
-            below the visible glyph that extended into adjacent title spans and
-            caused false positives.  The centre-point test is precise: a title
-            span sitting below an icon has its centre outside the icon's bbox.
+        def _sample_bg(rect: fitz.Rect) -> tuple[tuple, float]:
             """
-            cx = (rect.x0 + rect.x1) * 0.5
-            cy = (rect.y0 + rect.y1) * 0.5
-            return any(img_r.x0 <= cx <= img_r.x1 and img_r.y0 <= cy <= img_r.y1
-                       for img_r in _image_rects)
+            Sample background colour from the pre-rendered pixmap.
 
-        def _sample_pixel(rect: fitz.Rect) -> tuple:
-            """Return the page colour at the centre of rect using the cached pixmap."""
-            nonlocal _pix
-            if _pix is None:
-                _pix = page.get_pixmap(matrix=fitz.Matrix(_PIX_SCALE, _PIX_SCALE))
-            cx = int((rect.x0 + rect.x1) * 0.5 * _PIX_SCALE)
-            cy = int((rect.y0 + rect.y1) * 0.5 * _PIX_SCALE)
-            cx = max(0, min(cx, _pix.width  - 1))
-            cy = max(0, min(cy, _pix.height - 1))
-            try:
-                pixel = _pix.pixel(cx, cy)   # returns (R, G, B[, A]) as ints 0-255
-                return (pixel[0] / 255.0, pixel[1] / 255.0, pixel[2] / 255.0)
-            except Exception:
-                return (1.0, 1.0, 1.0)
+            Probes rows ABOVE and BELOW the text span (not within it) so that
+            text-ink pixels don't contaminate the result.  Returns
+            (median_rgb, luminance_variance).  High variance means a gradient
+            or complex background; low variance means a solid colour.
+            """
+            scale = _PIX_SCALE
+            px0 = max(0, int(rect.x0 * scale))
+            px1 = min(_pix.width  - 1, int(rect.x1 * scale))
+            py0 = int(rect.y0 * scale)
+            py1 = int(rect.y1 * scale)
+            h   = max(1, py1 - py0)
+
+            # x positions: left edge, centre, right edge
+            xs = [px0, (px0 + px1) // 2, px1] if px1 > px0 else [px0]
+
+            # Primary probes: half-a-line-height above and below (ink-free rows)
+            probe_ys: list[int] = []
+            above = py0 - max(2, h // 2)
+            below = py1 + max(2, h // 2)
+            if 0 <= above < _pix.height:
+                probe_ys.append(above)
+            if 0 <= below < _pix.height:
+                probe_ys.append(below)
+
+            # Fallback probe rows: within the span (may include ink)
+            fallback_ys = [py0, (py0 + py1) // 2, py1]
+
+            samples: list[tuple[float, float, float]] = []
+            for yi in (probe_ys or fallback_ys):
+                for xi in xs:
+                    if 0 <= xi < _pix.width and 0 <= yi < _pix.height:
+                        try:
+                            p = _pix.pixel(xi, yi)
+                            samples.append((p[0] / 255.0, p[1] / 255.0, p[2] / 255.0))
+                        except Exception:
+                            pass
+
+            # If above/below probes gave nothing, fall back to in-span sampling
+            if not samples:
+                for yi in fallback_ys:
+                    for xi in xs:
+                        if 0 <= xi < _pix.width and 0 <= yi < _pix.height:
+                            try:
+                                p = _pix.pixel(xi, yi)
+                                samples.append((p[0] / 255.0, p[1] / 255.0, p[2] / 255.0))
+                            except Exception:
+                                pass
+
+            if not samples:
+                return (1.0, 1.0, 1.0), 0.0
+
+            lums  = [0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2] for c in samples]
+            mean  = sum(lums) / len(lums)
+            var   = sum((l - mean) ** 2 for l in lums) / len(lums)
+
+            samples.sort(key=lambda c: 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2])
+            return samples[len(samples) // 2], var
 
         # active = spans we will erase + replace with translated text
         active: list[TextSpan] = []
         _has_image_redacts = False
         for span in pending:
-            bg = _bg_at(span.rect)
-            on_image = bg == (1.0, 1.0, 1.0) and _center_over_image(span.rect)
+            bg         = _bg_at(span.rect)
             erase_rect = fitz.Rect(
                 span.rect.x0 - 2, span.rect.y0 - 2,
                 span.rect.x1 + 2, span.rect.y1 + 2,
             )
-            if on_image:
-                # Span is over a raster image background (hero, banner, gradient).
-                # draw_rect() would paint a solid-colour patch that clashes with the
-                # gradient. Instead use a transparent redaction annotation:
-                # fill=(-1,-1,-1) removes text from the content stream and paints
-                # nothing, letting the image background show through cleanly.
-                page.add_redact_annot(erase_rect, fill=None)
-                _has_image_redacts = True
-            else:
+            if bg != (1.0, 1.0, 1.0):
+                # Solid coloured vector rect (detected by get_drawings) → paint it.
                 page.draw_rect(erase_rect, fill=bg, color=None)
+            else:
+                # No vector rect → inspect the pre-rendered pixmap.
+                sampled, variance = _sample_bg(span.rect)
+                lum = 0.299 * sampled[0] + 0.587 * sampled[1] + 0.114 * sampled[2]
+                if lum > 0.90:
+                    # Effectively white background (body text area).
+                    page.draw_rect(erase_rect, fill=(1.0, 1.0, 1.0), color=None)
+                elif variance < 0.008:
+                    # Solid non-white background (Form XObject coloured strip,
+                    # e.g. ICICI amber sidebar) — draw solid rect with sampled colour.
+                    page.draw_rect(erase_rect, fill=sampled, color=None)
+                else:
+                    # Non-uniform / gradient background (hero section, photo banner)
+                    # — transparent redaction removes original text without painting
+                    # a colour patch that would clash with the gradient.
+                    page.add_redact_annot(erase_rect, fill=None)
+                    _has_image_redacts = True
             active.append(span)
 
         # Apply transparent redactions for image-background spans before inserting text

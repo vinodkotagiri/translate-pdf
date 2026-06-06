@@ -14,7 +14,8 @@ FROM python:3.11-slim
 #                    Malayalam, Gujarati, Gurmukhi, Odia, Devanagari …)
 # fonts-noto-core  → NotoSans fallback fonts + Arabic, Hebrew, Thai …
 # fonts-noto-cjk   → Japanese, Chinese, Korean
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
         libmupdf-dev \
         libfreetype6 \
         libharfbuzz0b \
@@ -22,7 +23,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libopenjp2-7 \
         fonts-indic \
         fonts-noto-core \
+        fonts-noto-extra \
         fonts-noto-cjk \
+    && (apt-get install -y --no-install-recommends \
+        fonts-deva fonts-beng fonts-taml fonts-telu \
+        fonts-mlym fonts-gujr fonts-knda fonts-orya fonts-guru \
+        || echo "Note: some script-specific font packages not found on this Debian version") \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
