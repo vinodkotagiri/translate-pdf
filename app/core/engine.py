@@ -214,6 +214,29 @@ _LANG_FONT_CANDIDATES: dict[str, dict[str, list[str]]] = {
 # (lang, is_bold) → resolved font path or None
 _font_cache: dict[tuple[str, bool], str | None] = {}
 
+# font_path → (fitz.Archive, CSS family name)
+# Re-using Archives across pages is safe — Archive objects are read-only after creation.
+_font_archive_cache: dict[str, tuple] = {}
+
+
+def _get_font_archive(font_path: str | None) -> tuple:
+    """Return a cached (fitz.Archive, font-family-name), or (None, None) on failure.
+
+    Uses the Archive constructor with the font file's parent directory — this avoids
+    the Archive.add() signature differences across PyMuPDF 1.24.x builds (some builds
+    don't accept 'name' as a keyword argument). Failures are cached so we only warn once.
+    """
+    if not font_path or not Path(font_path).exists():
+        return None, None
+    if font_path not in _font_archive_cache:
+        try:
+            arc = fitz.Archive(str(Path(font_path).parent))
+            _font_archive_cache[font_path] = (arc, Path(font_path).stem)
+        except Exception as exc:
+            log.warning("Archive creation failed for %s: %s", font_path, exc)
+            _font_archive_cache[font_path] = (None, None)  # cache failure to suppress repeats
+    return _font_archive_cache[font_path]
+
 
 def _get_unicode_font(target_lang: str, is_bold: bool = False) -> str | None:
     """Return path to a font for the target language and weight, or None.
@@ -1026,20 +1049,54 @@ def rebuild_pdf(doc: fitz.Document, pages: list[PageSpans], target_lang: str = "
                     )
                     continue
 
-                try:
-                    page.insert_text(
-                        fitz.Point(span.origin[0], span.origin[1]),
-                        translated,
-                        fontfile=unicode_font,
-                        fontname=unicode_alias,
-                        fontsize=size,
-                        color=color,
-                        rotate=rotate,
-                        render_mode=0,
-                        border_width=0.0,
+                arc, ff = _get_font_archive(unicode_font) if rotate == 0 else (None, None)
+                if arc is not None:
+                    # insert_htmlbox routes through MuPDF's Story + HarfBuzz engine,
+                    # which applies GSUB/GPOS lookups so Devanagari conjuncts
+                    # (e.g. ट् + र → ट्र) form correctly in the stored glyph stream.
+                    # insert_text bypasses shaping and stores raw codepoint→GID
+                    # mappings, producing unjoined individual glyphs.
+                    r_i = int(color[0] * 255)
+                    g_i = int(color[1] * 255)
+                    b_i = int(color[2] * 255)
+                    css = (
+                        f"@font-face{{font-family:'{ff}';"
+                        f"src:url('{Path(unicode_font).name}');}}"
+                        f"p{{font-family:'{ff}';font-size:{size}pt;"
+                        f"color:rgb({r_i},{g_i},{b_i});"
+                        f"margin:0;padding:0;white-space:nowrap;}}"
                     )
-                except Exception as exc:
-                    log.warning("unicode insert_text p%d: %s", page_data.page_num, exc)
+                    try:
+                        page.insert_htmlbox(
+                            span.rect, f"<p>{translated}</p>",
+                            css=css, archive=arc,
+                        )
+                    except Exception as exc:
+                        log.warning("insert_htmlbox p%d: %s", page_data.page_num, exc)
+                        try:
+                            page.insert_text(
+                                fitz.Point(span.origin[0], span.origin[1]),
+                                translated, fontfile=unicode_font,
+                                fontname=unicode_alias, fontsize=size,
+                                color=color, rotate=0,
+                                render_mode=0, border_width=0.0,
+                            )
+                        except Exception as e2:
+                            log.warning("unicode insert_text fallback p%d: %s",
+                                        page_data.page_num, e2)
+                else:
+                    # Rotated text, or htmlbox archive unavailable:
+                    # insert_text is the fallback (no HarfBuzz shaping, but functional).
+                    try:
+                        page.insert_text(
+                            fitz.Point(span.origin[0], span.origin[1]),
+                            translated, fontfile=unicode_font,
+                            fontname=unicode_alias, fontsize=size,
+                            color=color, rotate=rotate,
+                            render_mode=0, border_width=0.0,
+                        )
+                    except Exception as exc:
+                        log.warning("unicode insert_text p%d: %s", page_data.page_num, exc)
 
             else:
                 pt   = fitz.Point(span.origin[0], span.origin[1])

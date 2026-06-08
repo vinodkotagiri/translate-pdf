@@ -87,6 +87,16 @@ def build_translation_prompt(texts: list[str], target_lang: str, source_lang: st
     )
 
 
+_ZWS = chr(0x200B)  # Zero-width space — LLMs sometimes inject this between Indic syllables
+
+
+def _clean_translation(text: str) -> str:
+    """Remove artifacts that LLMs sometimes inject into Indic/non-Latin output."""
+    text = text.replace(_ZWS, '')
+    text = re.sub(r'[ \t]{2,}', ' ', text)    # Collapse multiple spaces/tabs
+    return text.strip()
+
+
 def parse_llm_response(raw: str, original_texts: list[str]) -> list[str]:
     """Parse JSON from LLM response. Multiple fallback strategies."""
     raw = raw.strip()
@@ -99,7 +109,8 @@ def parse_llm_response(raw: str, original_texts: list[str]) -> list[str]:
     # Try direct parse
     try:
         parsed = json.loads(raw)
-        return [str(parsed.get(str(i), original_texts[i])) for i in range(len(original_texts))]
+        return [_clean_translation(str(parsed.get(str(i), original_texts[i])))
+                for i in range(len(original_texts))]
     except json.JSONDecodeError:
         pass
 
@@ -108,7 +119,8 @@ def parse_llm_response(raw: str, original_texts: list[str]) -> list[str]:
     if m:
         try:
             parsed = json.loads(m.group())
-            return [str(parsed.get(str(i), original_texts[i])) for i in range(len(original_texts))]
+            return [_clean_translation(str(parsed.get(str(i), original_texts[i])))
+                    for i in range(len(original_texts))]
         except json.JSONDecodeError:
             pass
 
