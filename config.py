@@ -26,7 +26,7 @@ class Config:
     MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", 20))
 
     # ── Translation engine ───────────────────────────────────────────
-    DEFAULT_PROVIDER   = os.environ.get("DEFAULT_PROVIDER", "claude")
+    DEFAULT_PROVIDER   = os.environ.get("DEFAULT_PROVIDER", "openai")
     MAX_WORKERS        = int(os.environ.get("MAX_WORKERS", 8))   # 8 parallel page workers
     CHUNK_SIZE         = int(os.environ.get("CHUNK_SIZE", 20))
     MAX_PAGES          = int(os.environ.get("MAX_PAGES", 500))   # hard page-count cap

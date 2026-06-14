@@ -23,7 +23,7 @@ services:
       COHERE_API_KEY:    ${COHERE_API_KEY:-}
       OLLAMA_BASE_URL:   ${OLLAMA_BASE_URL:-http://ollama:11434}
       # Service config
-      DEFAULT_PROVIDER:    ${DEFAULT_PROVIDER:-claude}
+      DEFAULT_PROVIDER:    ${DEFAULT_PROVIDER:-openai}
       MAX_WORKERS:         ${MAX_WORKERS:-6}
       CHUNK_SIZE:          ${CHUNK_SIZE:-20}
       MAX_UPLOAD_MB:       ${MAX_UPLOAD_MB:-100}

@@ -88,32 +88,22 @@ def _resolve_api_key(provider: str, override: str | None) -> str | None:
 
 
 def _parse_params(form) -> dict | tuple[str, int]:
-    """Parse and validate common translation parameters."""
+    """Parse and validate translation parameters. Only target_lang comes from the caller;
+    everything else is taken from server configuration."""
     target_lang = (form.get("target_lang") or "").strip()
     if not target_lang:
         return "target_lang is required", 400
 
-    provider = (form.get("provider") or _cfg().get("DEFAULT_PROVIDER", "claude")).strip().lower()
-    if provider not in PROVIDERS:
-        return (
-            f"Unknown provider '{provider}'. "
-            f"Available: {', '.join(PROVIDERS)}", 400
-        )
-
-    try:
-        max_workers = int(form.get("max_workers") or _cfg().get("MAX_WORKERS", 6))
-        chunk_size  = int(form.get("chunk_size")  or _cfg().get("CHUNK_SIZE", 20))
-    except ValueError:
-        return "max_workers and chunk_size must be integers", 400
+    provider = _cfg().get("DEFAULT_PROVIDER", "openai").strip().lower()
 
     return {
         "target_lang": target_lang,
         "provider":    provider,
-        "model":       form.get("model") or None,
-        "api_key":     _resolve_api_key(provider, form.get("api_key")),
-        "source_lang": form.get("source_lang") or None,
-        "max_workers": max(1, min(max_workers, 20)),
-        "chunk_size":  max(1, min(chunk_size, 50)),
+        "model":       None,                              # use provider default
+        "api_key":     _resolve_api_key(provider, None),  # always from env var
+        "source_lang": None,                              # auto-detect
+        "max_workers": int(_cfg().get("MAX_WORKERS", 6)),
+        "chunk_size":  int(_cfg().get("CHUNK_SIZE", 20)),
     }
 
 
@@ -234,12 +224,12 @@ def openapi_spec():
             "title": "PDF Translator API",
             "version": "1.0.0",
             "description": (
-                "Production-grade PDF translation service. Extracts searchable text from PDFs, "
-                "translates it via LLM providers, and reconstructs the PDF with translated text "
-                "while preserving all layout, images, and formatting.\n\n"
-                "**Indian languages** (all 22 scheduled languages) are mandatory and prioritised. "
-                "**Page limit**: 500 pages per document. "
-                "**Throughput target**: ≥10 PDFs/minute with a fast LLM provider."
+                "Translate any PDF to any language while preserving all layout, images, "
+                "font sizes, colors, and formatting.\n\n"
+                "**Just two fields required**: upload your PDF and pick a target language — "
+                "everything else is handled automatically.\n\n"
+                "Supports all 22 Indian scheduled languages plus 40+ world languages. "
+                "Maximum 500 pages per document."
             ),
             "contact": {"name": "API Support", "email": "support@example.com"},
         },
@@ -327,10 +317,10 @@ def openapi_spec():
                     "summary": "Translate PDF (synchronous)",
                     "description": (
                         "Upload a PDF and receive the translated PDF in the response body. "
-                        "The call blocks until translation is complete. Maximum **500 pages**.\n\n"
-                        "Original text is **deleted from the content stream** via PDF redaction "
-                        "(not just painted over), so the output is clean and fully searchable "
-                        "in the target language."
+                        "The call blocks until translation is complete — use the async endpoint "
+                        "for documents larger than ~20 pages.\n\n"
+                        "Original text is deleted from the PDF content stream (not just painted "
+                        "over), so the output is clean and fully searchable in the target language."
                     ),
                     "operationId": "translateSync",
                     "requestBody": {
@@ -341,19 +331,16 @@ def openapi_spec():
                                     "type": "object",
                                     "required": ["file", "target_lang"],
                                     "properties": {
-                                        "file":        {"type": "string", "format": "binary",
-                                                        "description": "PDF file to translate"},
-                                        "target_lang": {"type": "string", "example": "Hindi",
-                                                        "description": "Target language name"},
-                                        "provider":    {"type": "string", "default": "claude",
-                                                        "enum": ["claude", "openai", "gemini", "grok", "groq", "mistral", "cohere", "ollama"]},
-                                        "model":       {"type": "string", "description": "Override default model"},
-                                        "api_key":     {"type": "string", "description": "Override env-var API key"},
-                                        "source_lang": {"type": "string", "description": "Skip auto-detection"},
-                                        "max_workers": {"type": "integer", "default": 8, "minimum": 1, "maximum": 20,
-                                                        "description": "Parallel translation threads"},
-                                        "chunk_size":  {"type": "integer", "default": 20, "minimum": 1, "maximum": 50,
-                                                        "description": "Text spans per LLM call"},
+                                        "file": {
+                                            "type": "string",
+                                            "format": "binary",
+                                            "description": "PDF file to translate (max 100 MB, 500 pages)",
+                                        },
+                                        "target_lang": {
+                                            "type": "string",
+                                            "example": "Hindi",
+                                            "description": "Target language — e.g. Hindi, Tamil, French, Japanese",
+                                        },
                                     },
                                 }
                             }
@@ -385,10 +372,10 @@ def openapi_spec():
                     "tags": ["translation"],
                     "summary": "Translate PDF (asynchronous)",
                     "description": (
-                        "Submit a translation job. Returns a `job_id` immediately. "
-                        "Poll `GET /api/v1/jobs/{job_id}` until `status` is `done`, "
-                        "then download from `GET /api/v1/jobs/{job_id}/download`.\n\n"
-                        "Same form fields as the synchronous endpoint."
+                        "Submit a translation job and get a `job_id` back immediately. "
+                        "Recommended for documents larger than ~20 pages.\n\n"
+                        "**Workflow**: submit → poll `GET /api/v1/jobs/{job_id}` until "
+                        "`status` is `done` → download from `GET /api/v1/jobs/{job_id}/download`."
                     ),
                     "operationId": "translateAsync",
                     "requestBody": {
@@ -399,14 +386,16 @@ def openapi_spec():
                                     "type": "object",
                                     "required": ["file", "target_lang"],
                                     "properties": {
-                                        "file":        {"type": "string", "format": "binary"},
-                                        "target_lang": {"type": "string", "example": "Tamil"},
-                                        "provider":    {"type": "string", "default": "claude"},
-                                        "model":       {"type": "string"},
-                                        "api_key":     {"type": "string"},
-                                        "source_lang": {"type": "string"},
-                                        "max_workers": {"type": "integer", "default": 8},
-                                        "chunk_size":  {"type": "integer", "default": 20},
+                                        "file": {
+                                            "type": "string",
+                                            "format": "binary",
+                                            "description": "PDF file to translate",
+                                        },
+                                        "target_lang": {
+                                            "type": "string",
+                                            "example": "Tamil",
+                                            "description": "Target language name",
+                                        },
                                     },
                                 }
                             }
