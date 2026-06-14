@@ -18,6 +18,7 @@ gunicorn>=22.0.0
 
 # ── Job store backend ────────────────────────────────────────────────────────
 redis>=5.0.0             # Redis client (optional — falls back to in-memory)
+celery>=5.3.0            # Async task queue for long-running PDF jobs
 
 # ── LLM providers (install only what you use) ────────────────────────────────
 

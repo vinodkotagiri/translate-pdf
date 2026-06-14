@@ -231,7 +231,11 @@ class GeminiProvider(LLMProvider):
         resp = self.client.models.generate_content(
             model    = self.model,
             contents = build_translation_prompt(texts, target_lang, source_lang),
-            config   = self._gtypes.GenerateContentConfig(temperature=0.1, max_output_tokens=4096),
+            config   = self._gtypes.GenerateContentConfig(
+                temperature        = 0.1,
+                max_output_tokens  = 4096,
+                response_mime_type = "application/json",
+            ),
         )
         return parse_llm_response(resp.text, texts)
 
@@ -249,10 +253,11 @@ class GrokProvider(LLMProvider):
     @with_retry
     def translate_batch(self, texts, target_lang, source_lang):
         resp = self.client.chat.completions.create(
-            model       = self.model,
-            max_tokens  = 4096,
-            temperature = 0.1,
-            messages    = [
+            model           = self.model,
+            max_tokens      = 4096,
+            temperature     = 0.1,
+            response_format = {"type": "json_object"},
+            messages        = [
                 {"role": "system", "content": "You are a professional translator. Respond with valid JSON only."},
                 {"role": "user",   "content": build_translation_prompt(texts, target_lang, source_lang)},
             ],
@@ -273,10 +278,11 @@ class GroqProvider(LLMProvider):
     @with_retry
     def translate_batch(self, texts, target_lang, source_lang):
         resp = self.client.chat.completions.create(
-            model       = self.model,
-            max_tokens  = 4096,
-            temperature = 0.1,
-            messages    = [
+            model           = self.model,
+            max_tokens      = 4096,
+            temperature     = 0.1,
+            response_format = {"type": "json_object"},
+            messages        = [
                 {"role": "system", "content": "You are a professional translator. Respond with valid JSON only."},
                 {"role": "user",   "content": build_translation_prompt(texts, target_lang, source_lang)},
             ],
@@ -297,10 +303,11 @@ class MistralProvider(LLMProvider):
     @with_retry
     def translate_batch(self, texts, target_lang, source_lang):
         resp = self.client.chat.completions.create(
-            model       = self.model,
-            max_tokens  = 4096,
-            temperature = 0.1,
-            messages    = [
+            model           = self.model,
+            max_tokens      = 4096,
+            temperature     = 0.1,
+            response_format = {"type": "json_object"},
+            messages        = [
                 {"role": "system", "content": "You are a professional translator. Respond with valid JSON only."},
                 {"role": "user",   "content": build_translation_prompt(texts, target_lang, source_lang)},
             ],
@@ -342,10 +349,11 @@ class OllamaProvider(LLMProvider):
     @with_retry
     def translate_batch(self, texts, target_lang, source_lang):
         resp = self.client.chat.completions.create(
-            model       = self.model,
-            max_tokens  = 4096,
-            temperature = 0.1,
-            messages    = [
+            model           = self.model,
+            max_tokens      = 4096,
+            temperature     = 0.1,
+            response_format = {"type": "json_object"},
+            messages        = [
                 {"role": "system", "content": "You are a professional translator. Respond with valid JSON only."},
                 {"role": "user",   "content": build_translation_prompt(texts, target_lang, source_lang)},
             ],

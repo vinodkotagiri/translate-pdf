@@ -28,6 +28,13 @@ from app.core.engine import translate_pdf_file
 from app.core.job_store import JobStatus, get_job_store
 from app.core.providers import ENV_KEYS, PROVIDER_MODELS, PROVIDERS
 
+# Celery is optional — falls back to threading when not installed or broker unreachable
+_celery_task = None
+try:
+    from app.core.tasks import translate_pdf_task as _celery_task
+except ImportError:
+    pass
+
 log = logging.getLogger(__name__)
 bp  = Blueprint("api", __name__)
 
@@ -678,11 +685,19 @@ def translate_async():
     f.save(str(input_path))
     store.update(job_id, input_path=str(input_path), output_path=str(output_path))
 
-    threading.Thread(
-        target  = _run_async_job,
-        args    = (current_app._get_current_object(), job_id, input_path, output_path, params),
-        daemon  = True,
-    ).start()
+    dispatched = False
+    if _celery_task is not None:
+        try:
+            _celery_task.delay(job_id, str(input_path), str(output_path), params)
+            dispatched = True
+        except Exception as exc:
+            log.warning("Celery dispatch failed (%s) — falling back to thread", exc)
+    if not dispatched:
+        threading.Thread(
+            target  = _run_async_job,
+            args    = (current_app._get_current_object(), job_id, input_path, output_path, params),
+            daemon  = True,
+        ).start()
 
     base = request.host_url.rstrip("/")
     return jsonify({

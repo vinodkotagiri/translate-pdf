@@ -69,6 +69,36 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── Celery worker ────────────────────────────────────────────────────────────
+  worker:
+    build: .
+    image: pdf-translator:latest
+    container_name: pdf_translator_worker
+    restart: unless-stopped
+    command: celery -A app.core.tasks.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      FLASK_ENV: production
+      REDIS_URL: redis://redis:6379/0
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY:    ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY:    ${GEMINI_API_KEY:-}
+      GROK_API_KEY:      ${GROK_API_KEY:-}
+      GROQ_API_KEY:      ${GROQ_API_KEY:-}
+      MISTRAL_API_KEY:   ${MISTRAL_API_KEY:-}
+      COHERE_API_KEY:    ${COHERE_API_KEY:-}
+      OLLAMA_BASE_URL:   ${OLLAMA_BASE_URL:-http://ollama:11434}
+      DEFAULT_PROVIDER:  ${DEFAULT_PROVIDER:-claude}
+      MAX_WORKERS:       ${MAX_WORKERS:-6}
+      CHUNK_SIZE:        ${CHUNK_SIZE:-20}
+      LOG_LEVEL:         ${LOG_LEVEL:-INFO}
+    volumes:
+      - uploads_vol:/app/uploads
+      - outputs_vol:/app/outputs
+      - logs_vol:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+
   # ── Nginx reverse proxy ──────────────────────────────────────────────────────
   nginx:
     image: nginx:alpine

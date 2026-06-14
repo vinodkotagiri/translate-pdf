@@ -423,77 +423,145 @@ def _insert_text_mixed(
 # ── Data structures ────────────────────────────────────────────────────────────
 
 @dataclass
-class TextSpan:
+class TextBlock:
     page_num:   int
     block_idx:  int
-    span_idx:   int
-    text:       str
-    rect:       fitz.Rect
-    font_name:  str
-    font_size:  float
-    font_flags: int
-    color:      int          # packed 0xRRGGBB
-    origin:     tuple[float, float]
-    direction:  tuple[float, float] = (1.0, 0.0)  # (cos θ, sin θ) of text baseline
+    text:       str        # combined text of all spans in the block (paragraph)
+    rect:       fitz.Rect  # bounding box of the entire block
+    spans:      list       # raw span dicts from get_text("dict") for font/color/origin
     translated: str = ""
 
 
 @dataclass
 class PageSpans:
     page_num: int
-    spans:    list[TextSpan] = field(default_factory=list)
+    spans:    list = field(default_factory=list)  # list[TextBlock]
+
+
+def _dominant_span(spans: list) -> dict:
+    """Return the span with the most non-whitespace characters (font/color representative)."""
+    if not spans:
+        return {}
+    return max(spans, key=lambda s: len(s.get("text", "").strip()))
 
 
 # ── Extraction ─────────────────────────────────────────────────────────────────
 
 def extract_pages(doc: fitz.Document) -> list[PageSpans]:
     """
-    Extract all text spans from every page using PyMuPDF rawdict.
-    Compatible with PyMuPDF ≥1.18 (handles both 'text' and 'chars' span formats).
+    Extract text style-groups from every page using PyMuPDF dict.
+
+    Grouping strategy — LINE-level, not span-level:
+      • Each PDF line is treated as an atomic unit.  Its dominant span (most
+        non-whitespace chars) determines the line's style key (rounded font
+        size + bold flag).  This keeps mixed-style inline content (e.g. bold
+        term followed by a regular "/" separator) together on one line so the
+        translator sees it as a single string.
+      • Consecutive lines within the same block that share the same style key
+        are merged into one TextBlock so the LLM sees full paragraphs.
+      • A style change between consecutive lines (e.g. a bold heading line
+        followed by regular body lines) creates a new TextBlock, allowing
+        each to render with the correct weight and font size.
     """
     result: list[PageSpans] = []
 
     for page_num in range(len(doc)):
         page = doc[page_num]
-        page_spans = PageSpans(page_num=page_num)
-        raw = page.get_text("rawdict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+        page_data = PageSpans(page_num=page_num)
+        raw = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
 
         for b_idx, block in enumerate(raw.get("blocks", [])):
             if block.get("type") != 0:
-                continue  # skip image blocks
+                continue
+
+            block_x0 = float(block["bbox"][0])
+            block_x1 = float(block["bbox"][2])
+
+            # ── Build one entry per line ───────────────────────────────────────
+            line_entries: list[tuple] = []  # (style_key, line_text, spans, y0, y1)
+
             for line in block.get("lines", []):
-                line_dir = tuple(line.get("dir", (1.0, 0.0)))  # (cos θ, sin θ)
-                for s_idx, span in enumerate(line.get("spans", [])):
-                    # Handle both PyMuPDF span formats
-                    if "text" in span:
-                        text = span["text"].strip()
-                    elif "chars" in span:
-                        text = "".join(c.get("c", "") for c in span["chars"]).strip()
-                    else:
+                valid_spans: list[dict] = []
+                parts:       list[str]  = []
+
+                for span in line.get("spans", []):
+                    text = span.get("text", "").strip()
+                    if not text:
                         continue
-
-                    if len(text) < MIN_TEXT_LENGTH:
+                    if (any(ord(ch) in _GARBAGE_CODEPOINTS for ch in text)
+                            or any(0xE000 <= ord(ch) <= 0xF8FF for ch in text)):
                         continue
+                    valid_spans.append(span)
+                    parts.append(text)
 
-                    rect = fitz.Rect(span["bbox"])
-                    page_spans.spans.append(TextSpan(
-                        page_num   = page_num,
-                        block_idx  = b_idx,
-                        span_idx   = s_idx,
-                        text       = text,
-                        rect       = rect,
-                        font_name  = span.get("font", "helv"),
-                        font_size  = span.get("size", 11.0),
-                        font_flags = span.get("flags", 0),
-                        color      = span.get("color", 0),
-                        origin     = tuple(span.get("origin", (rect.x0, rect.y1))),
-                        direction  = line_dir,
-                    ))
+                if not valid_spans:
+                    continue
 
-        result.append(page_spans)
+                line_text = " ".join(parts)
+
+                # Style key from the dominant (longest) span in this line
+                dom    = max(valid_spans, key=lambda s: len(s.get("text", "").strip()))
+                ff     = int(dom.get("flags", 0))
+                fn     = dom.get("font", "").lower()
+                bold   = bool(ff & 16) or any(k in fn for k in ("bold", "demi", "black", "heavy"))
+                sz_key = round(float(dom.get("size", 11.0)))
+
+                # Y-extent from the line bbox (preferred) or span bboxes
+                lb = line.get("bbox")
+                if lb:
+                    ly0, ly1 = float(lb[1]), float(lb[3])
+                else:
+                    yr = fitz.Rect(valid_spans[0]["bbox"])
+                    for s in valid_spans[1:]:
+                        if s.get("bbox"):
+                            yr |= fitz.Rect(s["bbox"])
+                    ly0, ly1 = yr.y0, yr.y1
+
+                line_entries.append(((sz_key, bold), line_text, valid_spans, ly0, ly1))
+
+            if not line_entries:
+                continue
+
+            # ── Merge consecutive lines that share the same style key ──────────
+            groups: list[tuple] = []   # (key, text_lines, spans, y0, y1)
+            cur_key    = line_entries[0][0]
+            cur_lines  = [line_entries[0][1]]
+            cur_spans  = list(line_entries[0][2])
+            cur_y0     = line_entries[0][3]
+            cur_y1     = line_entries[0][4]
+
+            for key, lt, ls, ly0, ly1 in line_entries[1:]:
+                if key == cur_key:
+                    cur_lines.append(lt)
+                    cur_spans.extend(ls)
+                    cur_y1 = max(cur_y1, ly1)
+                else:
+                    groups.append((cur_key, cur_lines, cur_spans, cur_y0, cur_y1))
+                    cur_key, cur_lines, cur_spans = key, [lt], list(ls)
+                    cur_y0, cur_y1 = ly0, ly1
+            groups.append((cur_key, cur_lines, cur_spans, cur_y0, cur_y1))
+
+            # ── One TextBlock per style group ─────────────────────────────────
+            for sub_idx, (_key, grp_lines, grp_spans, gy0, gy1) in enumerate(groups):
+                grp_text = "\n".join(grp_lines).strip()
+                if len(grp_text) < MIN_TEXT_LENGTH:
+                    continue
+
+                # Full block x-extent so translations have room; group's own y-extent
+                grp_rect = fitz.Rect(block_x0, gy0, block_x1, gy1)
+
+                page_data.spans.append(TextBlock(
+                    page_num  = page_num,
+                    block_idx = b_idx * 1000 + sub_idx,
+                    text      = grp_text,
+                    rect      = grp_rect,
+                    spans     = grp_spans,
+                ))
+
+        result.append(page_data)
 
     total = sum(len(p.spans) for p in result)
-    log.info(f"Extracted {total} text spans from {len(result)} pages.")
+    log.info(f"Extracted {total} text style-groups from {len(result)} pages.")
     return result
 
 
@@ -765,17 +833,16 @@ def _find_bg_color(
 
 def rebuild_pdf(doc: fitz.Document, pages: list[PageSpans], target_lang: str = "") -> fitz.Document:
     """
-    For each page, true-delete the original text via PDF redaction (removes operators
-    from the content stream), then insert the translated text at the exact baseline.
+    For each page, erase original text blocks then insert translated text.
 
-    Processing is batched per page:
-      Phase 1 — collect spans eligible for translation
-      Phase 2 — draw_rect() to cover original text (background colour matched from
-                page drawings; white for body text, matched colour for coloured headers)
-      Phase 3 — insert translated text at original baseline positions
-
-    Bold: pure Indic bold → NotoSans*-Bold (real bold weight).
-          Mixed Indic+Latin: Lohit regular (covers both scripts in one TTF).
+    Processing per page:
+      Phase 1 — erase block bounding boxes (background-colour matched via vector
+                drawings and pixmap sampling, same as before)
+      Phase 2 — insert translated text using insert_htmlbox for all scripts:
+                • Indic / non-Latin → unicode font archive + HarfBuzz shaping
+                • Latin             → standard CSS font, no archive needed
+                Both paths auto-wrap within the block rect and auto-scale font
+                if text would overflow (scale_low=0.5 floor).
     """
     unicode_font_r = _get_unicode_font(target_lang, is_bold=False) if target_lang else None
     unicode_font_b = _get_unicode_font(target_lang, is_bold=True)  if target_lang else None
@@ -787,72 +854,21 @@ def rebuild_pdf(doc: fitz.Document, pages: list[PageSpans], target_lang: str = "
     for page_data in pages:
         page = doc[page_data.page_num]
 
-        # ── Phase 1: collect spans eligible for translation ────────────────────
-        pending: list[TextSpan] = []
-
-        for span in page_data.spans:
-            if not span.translated or span.translated == span.text:
+        # ── Collect eligible blocks ────────────────────────────────────────────
+        pending: list = []
+        for block in page_data.spans:
+            if not block.translated or block.translated == block.text:
                 continue
-            # Private Use Area glyphs (U+E000–U+F8FF) are custom brand/icon glyphs
-            # embedded in the original font — no standard font can reproduce them.
-            if any(0xE000 <= ord(ch) <= 0xF8FF for ch in span.text):
-                continue
-            # Control/special characters in the ORIGINAL text mean the PDF's font
-            # has no proper Unicode map.  The extracted text is garbage and the
-            # "translation" of garbage is also garbage, producing garbled glyphs.
-            # Skip and leave the original rendering intact.
-            if any(ord(ch) in _GARBAGE_CODEPOINTS for ch in span.text):
-                continue
-            # Also guard against garbage that slipped through to the translation.
-            # PUA or control chars in the translated string means the LLM echoed
-            # custom glyph codepoints back — inserting them produces the same blobs.
-            t = span.translated
+            t = block.translated
             if (any(ord(ch) in _GARBAGE_CODEPOINTS for ch in t)
                     or any(0xE000 <= ord(ch) <= 0xF8FF for ch in t)):
                 continue
-            pending.append(span)
+            pending.append(block)
 
         if not pending:
             continue
 
-        # Deduplicate: two spans with identical text whose bounding boxes overlap or
-        # whose y-midpoints are within 5pt of each other on the same line represent
-        # the same visual element (e.g. a bold "BUY" badge AND "BUY" inside the
-        # adjacent sentence span). Inserting both translations produces "खरीदें खरीदें".
-        # Keep the first occurrence; subsequent near-duplicates are dropped.
-        deduped: list[TextSpan] = []
-        for span in pending:
-            mid_y = (span.rect.y0 + span.rect.y1) * 0.5
-            is_dup = any(
-                s.text == span.text
-                and abs((s.rect.y0 + s.rect.y1) * 0.5 - mid_y) < 5.0
-                and not (s.rect & fitz.Rect(
-                    span.rect.x0 - 3, span.rect.y0 - 3,
-                    span.rect.x1 + 3, span.rect.y1 + 3,
-                )).is_empty
-                for s in deduped
-            )
-            if not is_dup:
-                deduped.append(span)
-        pending = deduped
-
-        # ── Phase 2: cover original text with background-matched rectangles ─────
-        # PDF redaction (add_redact_annot + apply_redactions) only processes the
-        # page's own content stream.  Text rendered through Form XObjects — common
-        # in InDesign/Illustrator-generated PDFs — lives in a separate sub-stream
-        # that the redaction engine never enters, so the original glyphs stay visible
-        # beneath our inserted translation and produce dark "blob" artefacts.
-        #
-        # draw_rect() appends a new graphics command to the END of the page stream,
-        # so it paints on top of ALL existing content (including XObject output),
-        # guaranteeing visual erasure of the original text regardless of how it was
-        # encoded.
-        #
-        # Background colour matching: we query the page's own vector drawings via
-        # get_drawings() to find any coloured filled shape that underlies the span.
-        # If one is found we match it (so a white rect on a blue bar looks correct);
-        # otherwise we use white (the dominant background in body text areas).
-        # Collect coloured vector backgrounds for colour matching.
+        # ── Snapshot coloured vector backgrounds ──────────────────────────────
         _colored_bgs: list[tuple[fitz.Rect, tuple]] = []
         for d in page.get_drawings():
             fill = d.get("fill")
@@ -862,12 +878,7 @@ def rebuild_pdf(doc: fitz.Document, pages: list[PageSpans], target_lang: str = "
                 except Exception:
                     pass
 
-        _PIX_SCALE = 0.5  # 50 % scale is fast and accurate enough for colour sampling
-
-        # Pre-render the page pixmap BEFORE any draw_rect modifications so that
-        # background colour sampling always reflects the original page content —
-        # including text rendered through Form XObjects (coloured side strips,
-        # ICICI-style vertical banners) that are invisible to get_drawings().
+        _PIX_SCALE = 0.5
         _pix = page.get_pixmap(matrix=fitz.Matrix(_PIX_SCALE, _PIX_SCALE))
 
         def _bg_at(rect: fitz.Rect) -> tuple:
@@ -884,26 +895,14 @@ def rebuild_pdf(doc: fitz.Document, pages: list[PageSpans], target_lang: str = "
                     best_ov, best_col = ov, col
             return best_col if best_ov > 0.2 else (1.0, 1.0, 1.0)
 
-        def _sample_bg(rect: fitz.Rect) -> tuple[tuple, float]:
-            """
-            Sample background colour from the pre-rendered pixmap.
-
-            Probes rows ABOVE and BELOW the text span (not within it) so that
-            text-ink pixels don't contaminate the result.  Returns
-            (median_rgb, luminance_variance).  High variance means a gradient
-            or complex background; low variance means a solid colour.
-            """
+        def _sample_bg(rect: fitz.Rect) -> tuple:
             scale = _PIX_SCALE
             px0 = max(0, int(rect.x0 * scale))
             px1 = min(_pix.width  - 1, int(rect.x1 * scale))
             py0 = int(rect.y0 * scale)
             py1 = int(rect.y1 * scale)
             h   = max(1, py1 - py0)
-
-            # x positions: left edge, centre, right edge
-            xs = [px0, (px0 + px1) // 2, px1] if px1 > px0 else [px0]
-
-            # Primary probes: half-a-line-height above and below (ink-free rows)
+            xs  = [px0, (px0 + px1) // 2, px1] if px1 > px0 else [px0]
             probe_ys: list[int] = []
             above = py0 - max(2, h // 2)
             below = py1 + max(2, h // 2)
@@ -911,10 +910,7 @@ def rebuild_pdf(doc: fitz.Document, pages: list[PageSpans], target_lang: str = "
                 probe_ys.append(above)
             if 0 <= below < _pix.height:
                 probe_ys.append(below)
-
-            # Fallback probe rows: within the span (may include ink)
             fallback_ys = [py0, (py0 + py1) // 2, py1]
-
             samples: list[tuple[float, float, float]] = []
             for yi in (probe_ys or fallback_ys):
                 for xi in xs:
@@ -924,8 +920,6 @@ def rebuild_pdf(doc: fitz.Document, pages: list[PageSpans], target_lang: str = "
                             samples.append((p[0] / 255.0, p[1] / 255.0, p[2] / 255.0))
                         except Exception:
                             pass
-
-            # If above/below probes gave nothing, fall back to in-span sampling
             if not samples:
                 for yi in fallback_ys:
                     for xi in xs:
@@ -935,201 +929,135 @@ def rebuild_pdf(doc: fitz.Document, pages: list[PageSpans], target_lang: str = "
                                 samples.append((p[0] / 255.0, p[1] / 255.0, p[2] / 255.0))
                             except Exception:
                                 pass
-
             if not samples:
                 return (1.0, 1.0, 1.0), 0.0
-
-            lums  = [0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2] for c in samples]
-            mean  = sum(lums) / len(lums)
-            var   = sum((l - mean) ** 2 for l in lums) / len(lums)
-
+            lums = [0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2] for c in samples]
+            mean = sum(lums) / len(lums)
+            var  = sum((l - mean) ** 2 for l in lums) / len(lums)
             samples.sort(key=lambda c: 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2])
             return samples[len(samples) // 2], var
 
-        # active = spans we will erase + replace with translated text
-        active: list[TextSpan] = []
+        # ── Phase 1: erase block bounding boxes ───────────────────────────────
         _has_image_redacts = False
-        for span in pending:
-            bg         = _bg_at(span.rect)
+        active: list = []
+        for block in pending:
+            bg = _bg_at(block.rect)
             erase_rect = fitz.Rect(
-                span.rect.x0 - 2, span.rect.y0 - 2,
-                span.rect.x1 + 2, span.rect.y1 + 2,
+                block.rect.x0 - 1, block.rect.y0 - 1,
+                block.rect.x1 + 1, block.rect.y1 + 1,
             )
             if bg != (1.0, 1.0, 1.0):
-                # Solid coloured vector rect (detected by get_drawings) → paint it.
                 page.draw_rect(erase_rect, fill=bg, color=None)
             else:
-                # No vector rect → inspect the pre-rendered pixmap.
-                sampled, variance = _sample_bg(span.rect)
+                sampled, variance = _sample_bg(block.rect)
                 lum = 0.299 * sampled[0] + 0.587 * sampled[1] + 0.114 * sampled[2]
                 if lum > 0.90:
-                    # Effectively white background (body text area).
                     page.draw_rect(erase_rect, fill=(1.0, 1.0, 1.0), color=None)
                 elif variance < 0.008:
-                    # Solid non-white background (Form XObject coloured strip,
-                    # e.g. ICICI amber sidebar) — draw solid rect with sampled colour.
                     page.draw_rect(erase_rect, fill=sampled, color=None)
                 else:
-                    # Non-uniform / gradient background (hero section, photo banner)
-                    # — transparent redaction removes original text without painting
-                    # a colour patch that would clash with the gradient.
                     page.add_redact_annot(erase_rect, fill=None)
                     _has_image_redacts = True
-            active.append(span)
+            active.append(block)
 
-        # Apply transparent redactions for image-background spans before inserting text
         if _has_image_redacts:
             page.apply_redactions(images=0, graphics=0)
 
-        # ── Phase 3: insert translated texts at original baseline positions ─────
-        for span in active:
-            # NFC normalization is required for Devanagari (and other Indic scripts)
-            # to form conjuncts correctly.  Without it, characters in NFD form are
-            # inserted as separate codepoints and HarfBuzz shaping doesn't fire,
-            # producing individual unjoined glyphs that look garbled.
-            translated = unicodedata.normalize("NFC", span.translated).strip()
+        # ── Phase 2: insert translated text via htmlbox ────────────────────────
+        for block in active:
+            translated = unicodedata.normalize("NFC", block.translated).strip()
             if not translated:
                 continue
 
-            n       = span.font_name.lower()
-            is_bold = bool(span.font_flags & 16) or any(
-                k in n for k in ("bold", "demi", "black", "heavy")
-            )
-            color      = _color_from_int(span.color)
-            latin_font = _resolve_font(span.font_name, span.font_flags)
+            dom        = _dominant_span(block.spans)
+            font_name  = dom.get("font", "helv")
+            font_size  = float(dom.get("size", 11.0))
+            font_flags = int(dom.get("flags", 0))
+            color      = _color_from_int(int(dom.get("color", 0)))
+            r_i        = int(color[0] * 255)
+            g_i        = int(color[1] * 255)
+            b_i        = int(color[2] * 255)
+
+            n        = font_name.lower()
+            is_bold  = bool(font_flags & 16) or any(k in n for k in ("bold", "demi", "black", "heavy"))
+            is_italic = bool(font_flags & 2)  or any(k in n for k in ("italic", "oblique", "slant"))
 
             trans_chars  = [ch for ch in translated if not _is_combining(ch) and ch.strip()]
             has_nonlatin = any(_needs_unicode_font(ch) for ch in trans_chars)
-            has_latin    = any(not _needs_unicode_font(ch) for ch in trans_chars)
-            is_mixed     = has_nonlatin and has_latin
 
-            # Pure Indic bold → use real bold font (NotoSans*-Bold).
-            # Mixed Indic+Latin: use Lohit regular (covers both scripts).
-            if is_bold and unicode_font_b and not is_mixed:
-                unicode_font  = unicode_font_b
-                unicode_alias = "F1"
-            else:
-                unicode_font  = unicode_font_r
-                unicode_alias = "F0"
-
-            rotate = _dir_to_rotate(span.direction)
-            # For rotated text the constraint dimension flips: width ↔ height
-            avail = span.rect.height if rotate in (90, 270) else span.rect.width
-
-            if has_nonlatin and unicode_font:
-                min_size = 7.0
-                size     = span.font_size
-                while size > min_size:
-                    try:
-                        tw = fitz.get_text_length(
-                            translated, fontfile=unicode_font,
-                            fontname=unicode_alias, fontsize=size,
-                        )
-                    except Exception:
-                        tw = len(translated) * size * 0.55
-                    if tw <= avail * 1.1:
-                        break
-                    size -= 0.5
-                size = max(size, min_size)
-
-                # If translated text still overflows at minimum size, skip.
-                # Inserting text wider than 2× the available span width causes it to
-                # bleed into adjacent spans, stacking into unreadable dark blobs.
-                try:
-                    tw_final = fitz.get_text_length(
-                        translated, fontfile=unicode_font,
-                        fontname=unicode_alias, fontsize=size,
-                    )
-                except Exception:
-                    tw_final = len(translated) * size * 0.55
-                if tw_final > avail * 2.0:
-                    log.debug(
-                        "skip overflow span p%d (tw=%.1f avail=%.1f)",
-                        page_data.page_num, tw_final, avail,
-                    )
-                    continue
-
-                arc, ff = _get_font_archive(unicode_font) if rotate == 0 else (None, None)
+            if has_nonlatin and (unicode_font_r or unicode_font_b):
+                if is_bold and unicode_font_b:
+                    unicode_font  = unicode_font_b
+                    unicode_alias = "F1"
+                    weight        = "bold"
+                else:
+                    unicode_font  = unicode_font_r
+                    unicode_alias = "F0"
+                    weight        = "normal"
+                arc, ff = _get_font_archive(unicode_font)
                 if arc is not None:
-                    # insert_htmlbox routes through MuPDF's Story + HarfBuzz engine,
-                    # which applies GSUB/GPOS lookups so Devanagari conjuncts
-                    # (e.g. ट् + र → ट्र) form correctly in the stored glyph stream.
-                    # insert_text bypasses shaping and stores raw codepoint→GID
-                    # mappings, producing unjoined individual glyphs.
-                    r_i = int(color[0] * 255)
-                    g_i = int(color[1] * 255)
-                    b_i = int(color[2] * 255)
                     css = (
                         f"@font-face{{font-family:'{ff}';"
-                        f"src:url('{Path(unicode_font).name}');}}"
-                        f"p{{font-family:'{ff}';font-size:{size}pt;"
+                        f"src:url('{Path(unicode_font).name}');"
+                        f"font-weight:{weight};}}"
+                        f"p{{font-family:'{ff}';font-size:{font_size}pt;"
+                        f"font-weight:{weight};"
                         f"color:rgb({r_i},{g_i},{b_i});"
-                        f"margin:0;padding:0;white-space:nowrap;}}"
+                        f"margin:0;padding:0;white-space:normal;}}"
                     )
                     try:
                         page.insert_htmlbox(
-                            span.rect, f"<p>{translated}</p>",
-                            css=css, archive=arc,
+                            block.rect, f"<p>{translated}</p>",
+                            css=css, archive=arc, scale_low=0.5,
                         )
                     except Exception as exc:
-                        log.warning("insert_htmlbox p%d: %s", page_data.page_num, exc)
+                        log.warning("insert_htmlbox indic p%d: %s", page_data.page_num, exc)
+                        origin = dom.get("origin", (block.rect.x0, block.rect.y1))
                         try:
                             page.insert_text(
-                                fitz.Point(span.origin[0], span.origin[1]),
+                                fitz.Point(origin[0], origin[1]),
                                 translated, fontfile=unicode_font,
-                                fontname=unicode_alias, fontsize=size,
-                                color=color, rotate=0,
-                                render_mode=0, border_width=0.0,
+                                fontname=unicode_alias, fontsize=font_size,
+                                color=color, render_mode=0, border_width=0.0,
                             )
                         except Exception as e2:
-                            log.warning("unicode insert_text fallback p%d: %s",
-                                        page_data.page_num, e2)
+                            log.warning("insert_text fallback p%d: %s", page_data.page_num, e2)
                 else:
-                    # Rotated text, or htmlbox archive unavailable:
-                    # insert_text is the fallback (no HarfBuzz shaping, but functional).
+                    origin = dom.get("origin", (block.rect.x0, block.rect.y1))
                     try:
                         page.insert_text(
-                            fitz.Point(span.origin[0], span.origin[1]),
+                            fitz.Point(origin[0], origin[1]),
                             translated, fontfile=unicode_font,
-                            fontname=unicode_alias, fontsize=size,
-                            color=color, rotate=rotate,
-                            render_mode=0, border_width=0.0,
-                        )
-                    except Exception as exc:
-                        log.warning("unicode insert_text p%d: %s", page_data.page_num, exc)
-
-            else:
-                pt   = fitz.Point(span.origin[0], span.origin[1])
-                # Pass a rect with the correct available dimension for vertical text
-                fit_rect = (
-                    fitz.Rect(span.rect.x0, span.rect.y0,
-                               span.rect.x0 + span.rect.height, span.rect.y1)
-                    if rotate in (90, 270) else span.rect
-                )
-                size = _fit_size(translated, latin_font, span.font_size, fit_rect)
-                try:
-                    tw_final = fitz.get_text_length(translated, fontname=latin_font, fontsize=size)
-                except Exception:
-                    tw_final = len(translated) * size * 0.55
-                if tw_final > avail * 2.0:
-                    log.debug(
-                        "skip overflow span (latin) p%d (tw=%.1f avail=%.1f)",
-                        page_data.page_num, tw_final, avail,
-                    )
-                    continue
-                try:
-                    page.insert_text(
-                        pt, translated, fontname=latin_font,
-                        fontsize=size, color=color, rotate=rotate,
-                    )
-                except Exception:
-                    try:
-                        page.insert_text(
-                            pt, translated, fontname="helv",
-                            fontsize=size, color=color, rotate=rotate,
+                            fontname=unicode_alias, fontsize=font_size,
+                            color=color, render_mode=0, border_width=0.0,
                         )
                     except Exception as exc:
                         log.warning("insert_text p%d: %s", page_data.page_num, exc)
+
+            else:
+                # Latin script: insert_htmlbox with standard CSS (no archive needed)
+                latin_font = _resolve_font(font_name, font_flags)
+                if latin_font.startswith("cour"):
+                    css_family = "monospace"
+                elif latin_font.startswith("ti"):
+                    css_family = "serif"
+                else:
+                    css_family = "sans-serif"
+                weight = "bold"   if is_bold   else "normal"
+                style  = "italic" if is_italic else "normal"
+                css = (
+                    f"p{{font-family:{css_family};font-size:{font_size}pt;"
+                    f"font-weight:{weight};font-style:{style};"
+                    f"color:rgb({r_i},{g_i},{b_i});"
+                    f"margin:0;padding:0;}}"
+                )
+                try:
+                    page.insert_htmlbox(
+                        block.rect, f"<p>{translated}</p>",
+                        css=css, scale_low=0.5,
+                    )
+                except Exception as exc:
+                    log.warning("insert_htmlbox latin p%d: %s", page_data.page_num, exc)
 
     return doc
 
