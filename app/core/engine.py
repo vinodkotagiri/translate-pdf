@@ -1002,6 +1002,7 @@ def rebuild_pdf(doc: fitz.Document, pages: list[PageSpans], target_lang: str = "
                         f"font-weight:{weight};}}"
                         f"p{{font-family:'{ff}';font-size:{font_size}pt;"
                         f"font-weight:{weight};"
+                        f"line-height:1.4;"
                         f"color:rgb({r_i},{g_i},{b_i});"
                         f"margin:0;padding:0;white-space:normal;}}"
                     )
@@ -1012,27 +1013,25 @@ def rebuild_pdf(doc: fitz.Document, pages: list[PageSpans], target_lang: str = "
                         )
                     except Exception as exc:
                         log.warning("insert_htmlbox indic p%d: %s", page_data.page_num, exc)
-                        origin = dom.get("origin", (block.rect.x0, block.rect.y1))
                         try:
-                            page.insert_text(
-                                fitz.Point(origin[0], origin[1]),
-                                translated, fontfile=unicode_font,
-                                fontname=unicode_alias, fontsize=font_size,
-                                color=color, render_mode=0, border_width=0.0,
+                            page.insert_textbox(
+                                block.rect, translated,
+                                fontfile=unicode_font, fontname=unicode_alias,
+                                fontsize=font_size, color=color,
+                                align=fitz.TEXT_ALIGN_LEFT,
                             )
                         except Exception as e2:
-                            log.warning("insert_text fallback p%d: %s", page_data.page_num, e2)
+                            log.warning("insert_textbox fallback p%d: %s", page_data.page_num, e2)
                 else:
-                    origin = dom.get("origin", (block.rect.x0, block.rect.y1))
                     try:
-                        page.insert_text(
-                            fitz.Point(origin[0], origin[1]),
-                            translated, fontfile=unicode_font,
-                            fontname=unicode_alias, fontsize=font_size,
-                            color=color, render_mode=0, border_width=0.0,
+                        page.insert_textbox(
+                            block.rect, translated,
+                            fontfile=unicode_font, fontname=unicode_alias,
+                            fontsize=font_size, color=color,
+                            align=fitz.TEXT_ALIGN_LEFT,
                         )
                     except Exception as exc:
-                        log.warning("insert_text p%d: %s", page_data.page_num, exc)
+                        log.warning("insert_textbox p%d: %s", page_data.page_num, exc)
 
             else:
                 # Latin script: insert_htmlbox with standard CSS (no archive needed)

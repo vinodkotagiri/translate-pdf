@@ -203,10 +203,11 @@ class OpenAIProvider(LLMProvider):
     @with_retry
     def translate_batch(self, texts, target_lang, source_lang):
         resp = self.client.chat.completions.create(
-            model       = self.model,
-            max_tokens  = 4096,
-            temperature = 0.1,
-            messages    = [
+            model           = self.model,
+            max_tokens      = 4096,
+            temperature     = 0.1,
+            response_format = {"type": "json_object"},
+            messages        = [
                 {"role": "system", "content": "You are a professional translator. Respond with valid JSON only."},
                 {"role": "user",   "content": build_translation_prompt(texts, target_lang, source_lang)},
             ],

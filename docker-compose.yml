@@ -87,7 +87,7 @@ services:
       MISTRAL_API_KEY:   ${MISTRAL_API_KEY:-}
       COHERE_API_KEY:    ${COHERE_API_KEY:-}
       OLLAMA_BASE_URL:   ${OLLAMA_BASE_URL:-http://ollama:11434}
-      DEFAULT_PROVIDER:  ${DEFAULT_PROVIDER:-claude}
+      DEFAULT_PROVIDER:  ${DEFAULT_PROVIDER:-openai}
       MAX_WORKERS:       ${MAX_WORKERS:-6}
       CHUNK_SIZE:        ${CHUNK_SIZE:-20}
       LOG_LEVEL:         ${LOG_LEVEL:-INFO}
